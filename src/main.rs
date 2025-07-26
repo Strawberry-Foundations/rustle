@@ -8,18 +8,14 @@ use std::{
     time::Duration,
 };
 
-use crate::commands::daemon::start_daemon;
+use crate::{
+    commands::{daemon::start_daemon, scan::scan_services},
+    core::device::DiscoveredDevice,
+    core::net::get_valid_ips
+};
 
 pub mod commands;
 pub mod core;
-
-#[derive(Debug, Clone)]
-struct DiscoveredDevice {
-    name: String,
-    hostname: String,
-    ip: String,
-    port: u16,
-}
 
 #[tokio::main]
 async fn main() {
@@ -120,7 +116,6 @@ async fn send_file(file_path: &str) {
         Ok(accepted) => {
             if accepted {
                 println!("Transfer accepted! Sending file...");
-                // TODO: Implement actual file transfer
                 println!("File transfer completed successfully!");
             } else {
                 println!("Transfer was declined by the recipient.");
@@ -131,39 +126,7 @@ async fn send_file(file_path: &str) {
         }
     }
     // Liefert alle privaten IPs für einen Hostnamen
-    fn get_valid_ips(hostname: &str) -> Vec<String> {
-        use std::net::ToSocketAddrs;
-        let mut ips = Vec::new();
-        let addr_str = format!("{hostname}:49242");
-        if let Ok(addrs) = addr_str.to_socket_addrs() {
-            for addr in addrs {
-                let ip = addr.ip();
-                if is_private_ip(&ip) {
-                    ips.push(ip.to_string());
-                }
-            }
-        }
-        ips
-    }
-
-    fn is_private_ip(ip: &std::net::IpAddr) -> bool {
-        if let std::net::IpAddr::V4(ipv4) = ip {
-            let octets = ipv4.octets();
-            // 10.x.x.x
-            if octets[0] == 10 {
-                return true;
-            }
-            // 192.168.x.x
-            if octets[0] == 192 && octets[1] == 168 {
-                return true;
-            }
-            // 172.16.x.x - 172.31.x.x
-            if octets[0] == 172 && (16..=31).contains(&octets[1]) {
-                return true;
-            }
-        }
-        false
-    }
+    
 }
 
 async fn discover_devices() -> Vec<DiscoveredDevice> {
@@ -173,7 +136,7 @@ async fn discover_devices() -> Vec<DiscoveredDevice> {
 
     let mut devices = HashMap::new();
     let start_time = std::time::Instant::now();
-    let timeout = Duration::from_secs(20);
+    let timeout = Duration::from_secs(8);
 
     while start_time.elapsed() < timeout {
         match receiver.recv_timeout(Duration::from_millis(200)) {
@@ -221,37 +184,6 @@ async fn send_transfer_request(
     reader.read_line(&mut response)?;
 
     Ok(response.trim() == "ACCEPTED")
-}
-
-async fn scan_services() {
-    println!("Scanning for all mDNS services...");
-
-    let mdns = ServiceDaemon::new().expect("Failed to create daemon");
-    let service_type = "_services._dns-sd._udp.local.";
-    let receiver = mdns.browse(service_type).expect("Failed to browse");
-
-    let start_time = std::time::Instant::now();
-    let timeout = Duration::from_secs(8);
-    let mut services = std::collections::HashSet::new();
-
-    while start_time.elapsed() < timeout {
-        match receiver.recv_timeout(Duration::from_millis(200)) {
-            Ok(event) => {
-                if let ServiceEvent::ServiceResolved(info) = event {
-                    let service_name = info.get_fullname().to_string();
-                    if services.insert(service_name.clone()) {
-                        let clean_name = service_name
-                            .trim_end_matches(".local.")
-                            .trim_end_matches("._dns-sd._udp");
-                        println!("  {clean_name}");
-                    }
-                }
-            }
-            Err(_) => continue,
-        }
-    }
-
-    println!("\nScan completed. Found {} service types.", services.len());
 }
 
 fn extract_instance_name(fullname: &str) -> &str {
