@@ -41,14 +41,17 @@ pub async fn send_file(file_path: &str) {
             return;
         }
     };
+
     let target_device = &devices[choice];
     let ips = get_valid_ips(&target_device.hostname);
     if ips.is_empty() {
         LOGGER.warning("No valid IP found for device.");
         return;
     }
+
     LOGGER.info(&format!("Select IP for connection (1-{}): ", ips.len()));
     std::io::Write::flush(&mut std::io::stdout()).unwrap();
+    
     let mut ip_input = String::new();
     std::io::stdin().read_line(&mut ip_input).unwrap();
     
