@@ -1,6 +1,5 @@
-use futures_util::stream::StreamExt;
-use mdns::{RecordKind, discover::all};
-use std::{env, time::Duration};
+use mdns_sd::{ServiceDaemon, ServiceInfo};
+use std::{env, time::Duration, collections::HashMap};
 
 #[tokio::main]
 async fn main() {
@@ -14,59 +13,90 @@ async fn main() {
     match args[1].as_str() {
         "send" => {
             println!("Send mode selected.");
-            let responder = libmdns::Responder::new().unwrap();
-            let _svc = responder.register(
-                "_rustle._tcp.local".to_owned(),
-                "Rustle File Server".to_owned(),  // Instance name, nicht der Service-Typ
-                8080,
-                &["path=/", "version=1.0"],
-            );
+            
+            // Create the mDNS daemon
+            let mdns = ServiceDaemon::new().expect("Failed to create mDNS daemon");
+            
+            // Create service info
+            let mut properties = HashMap::new();
+            properties.insert("path".to_string(), "/".to_string());
+            properties.insert("version".to_string(), "1.0".to_string());
+            
+            let service_info = ServiceInfo::new(
+                "_rustle._tcp.local.",  // Service type (mit Punkt am Ende!)
+                "Rustle File Server",   // Instance name
+                "localhost.local.",     // Hostname (muss mit .local. enden!)
+                (), // Default IP addresses
+                8080,                   // Port
+                properties              // TXT properties
+            ).expect("Failed to create service info");
 
+            // Register the service
+            mdns.register(service_info).expect("Failed to register service");
+            
             println!("Service registriert: _rustle._tcp.local auf Port 8080");
+            println!("Instance: Rustle File Server");
             println!("Warte auf Verbindungen...");
 
+            // Keep the service alive
             loop {
-                ::std::thread::sleep(::std::time::Duration::from_secs(10));
+                tokio::time::sleep(Duration::from_secs(10)).await;
             }
         }
         "receive" => {
             println!("Receive mode selected.");
-            let service_name = "_rustle._tcp.local";
-
-            // Starte die Discovery für 10 Sekunden (länger als vorher)
-            let listener = all(service_name, Duration::from_secs(10)).unwrap().listen();
-
-            println!("Starte Discovery nach Services: {}", service_name);
-            println!("Suche für 10 Sekunden...");
-
-            let mut listener = Box::pin(listener);
+            
+            // Create the mDNS daemon
+            let mdns = ServiceDaemon::new().expect("Failed to create mDNS daemon");
+            
+            // Browse for services
+            let receiver = mdns.browse("_rustle._tcp.local.").expect("Failed to browse");
+            
+            println!("Starte Discovery nach Services: _rustle._tcp.local.");
+            println!("Suche läuft...");
+            
             let mut found_services = false;
-
-            while let Some(result) = listener.next().await {
-                match result {
-                    Ok(response) => {
-                        found_services = true;
-                        println!("Service gefunden! Details:");
-                        for record in response.records() {
-                            match &record.kind {
-                                RecordKind::A(ip) => println!("  IPv4: {}", ip),
-                                RecordKind::AAAA(ip) => println!("  IPv6: {}", ip),
-                                RecordKind::SRV { port, target, .. } => {
-                                    println!("  Service: {} auf Port {}", target, port);
-                                },
-                                RecordKind::TXT(txt) => {
-                                    println!("  TXT-Records: {:?}", txt);
-                                },
-                                RecordKind::PTR(ptr) => {
-                                    println!("  PTR: {}", ptr);
-                                },
-                                _ => {}
+            let timeout = tokio::time::sleep(Duration::from_secs(10));
+            tokio::pin!(timeout);
+            
+            loop {
+                tokio::select! {
+                    event = receiver.recv_async() => {
+                        match event {
+                            Ok(event) => {
+                                use mdns_sd::ServiceEvent;
+                                match event {
+                                    ServiceEvent::ServiceResolved(info) => {
+                                        found_services = true;
+                                        println!("Service gefunden! Details:");
+                                        println!("  Name: {}", info.get_fullname());
+                                        println!("  Hostname: {}", info.get_hostname());
+                                        println!("  Port: {}", info.get_port());
+                                        println!("  Adressen:");
+                                        for addr in info.get_addresses() {
+                                            println!("    {}", addr);
+                                        }
+                                        println!("  TXT-Records:");
+                                        let properties = info.get_properties();
+                                        for property in properties.iter() {
+                                            println!("    {}", property);
+                                        }
+                                        println!("---");
+                                    }
+                                    ServiceEvent::ServiceRemoved(_, fullname) => {
+                                        println!("Service entfernt: {}", fullname);
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            Err(e) => {
+                                println!("Fehler beim Empfangen: {:?}", e);
                             }
                         }
-                        println!("---");
                     }
-                    Err(e) => {
-                        println!("Fehler beim Empfangen eines mDNS-Response: {:?}", e);
+                    _ = &mut timeout => {
+                        println!("Timeout erreicht.");
+                        break;
                     }
                 }
             }
@@ -80,22 +110,34 @@ async fn main() {
         }
         "scan" => {
             println!("Scanning for all mDNS services...");
-            let listener = all("_services._dns-sd._udp.local", Duration::from_secs(10)).unwrap().listen();
-            let mut listener = Box::pin(listener);
             
-            while let Some(result) = listener.next().await {
-                match result {
-                    Ok(response) => {
-                        println!("Found service type:");
-                        for record in response.records() {
-                            match &record.kind {
-                                RecordKind::PTR(ptr) => println!("  {}", ptr),
-                                _ => {}
+            let mdns = ServiceDaemon::new().expect("Failed to create mDNS daemon");
+            let receiver = mdns.browse("_services._dns-sd._udp.local").expect("Failed to browse");
+            
+            let timeout = tokio::time::sleep(Duration::from_secs(10));
+            tokio::pin!(timeout);
+            
+            loop {
+                tokio::select! {
+                    event = receiver.recv_async() => {
+                        match event {
+                            Ok(event) => {
+                                use mdns_sd::ServiceEvent;
+                                match event {
+                                    ServiceEvent::ServiceResolved(info) => {
+                                        println!("Found service type: {}", info.get_fullname());
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            Err(e) => {
+                                println!("Error: {:?}", e);
                             }
                         }
                     }
-                    Err(e) => {
-                        println!("Error: {:?}", e);
+                    _ = &mut timeout => {
+                        println!("Scan timeout.");
+                        break;
                     }
                 }
             }
