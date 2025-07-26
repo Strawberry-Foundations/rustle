@@ -1,8 +1,9 @@
 use lazy_static::lazy_static;
 
+use stblib::colors::{BLUE, BOLD, C_RESET, GRAY, GREEN, RED, YELLOW};
 use stblib::logging::Logger;
-use stblib::colors::{BLUE, BOLD, C_RESET, GREEN, RED, YELLOW, GRAY};
 
+use crate::core::config::ConfigManager;
 
 lazy_static! {
     pub static ref VERSION: String = env!("CARGO_PKG_VERSION").to_string();
@@ -22,4 +23,5 @@ lazy_static! {
             },
         }
     );
+    pub static ref CFG: ConfigManager = ConfigManager::new();
 }

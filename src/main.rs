@@ -1,6 +1,9 @@
 use std::env;
 
-use crate::commands::{daemon::start_daemon, scan::scan_services, send::send_file};
+use crate::{
+    commands::{daemon::Daemon, scan::scan_services, send::send_file},
+    core::constants::CFG,
+};
 
 pub mod commands;
 pub mod core;
@@ -16,7 +19,8 @@ async fn main() {
 
     match args[1].as_str() {
         "daemon" => {
-            start_daemon().await;
+            let daemon = Daemon::new(CFG.config.network.port, "localhost".to_string());
+            daemon.start().await;
         }
         "send" => {
             if args.len() < 3 {

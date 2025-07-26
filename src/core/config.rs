@@ -1,0 +1,109 @@
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::{Path, PathBuf};
+use directories::ProjectDirs;
+use crate::core::constants::LOGGER;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Config {
+    pub network: NetworkConfig,
+    pub general: GeneralConfig,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NetworkConfig {
+    pub port: u16,
+    pub discovery_timeout_secs: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GeneralConfig {
+    pub default_download_path: String,
+    pub show_notifications: bool,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            network: NetworkConfig {
+                port: 49242,
+                discovery_timeout_secs: 5,
+            },
+            general: GeneralConfig {
+                default_download_path: "~/Downloads".to_string(),
+                show_notifications: true,
+            },
+        }
+    }
+}
+
+pub struct ConfigManager {
+    pub config: Config,
+    _config_path: PathBuf,
+}
+
+impl ConfigManager {
+    pub fn new() -> Self {
+        let config_path = Self::get_config_path().expect("Could not find a valid home directory.");
+        let config = if config_path.exists() {
+            Self::load_from_file(&config_path)
+        } else {
+            LOGGER.warning(format!("No configuration file found. Creating a new one at: {:?}", &config_path));
+            Self::create_default_config(&config_path)
+        };
+        ConfigManager { config, _config_path: config_path }
+    }
+
+    fn load_from_file(path: &Path) -> Config {
+        match fs::read_to_string(path) {
+            Ok(content) => {
+                match serde_yaml::from_str(&content) {
+                    Ok(config) => {
+                        LOGGER.info(&format!("Configuration successfully loaded from {:?}.", path));
+                        config
+                    },
+                    Err(e) => {
+                        LOGGER.error(&format!("Error parsing configuration file: {}. Loading defaults.", e));
+                        Config::default()
+                    }
+                }
+            },
+            Err(e) => {
+                LOGGER.error(&format!("Error reading configuration file: {}. Loading defaults.", e));
+                Config::default()
+            }
+        }
+    }
+
+    fn create_default_config(path: &Path) -> Config {
+        let config = Config::default();
+        if let Some(parent) = path.parent() {
+            if let Err(e) = fs::create_dir_all(parent) {
+                LOGGER.error(&format!("Could not create configuration directory: {}", e));
+                return config;
+            }
+        }
+        match serde_yaml::to_string(&config) {
+            Ok(yaml) => {
+                if let Err(e) = fs::write(path, yaml) {
+                    LOGGER.error(&format!("Error writing default configuration: {}", e));
+                } else {
+                    LOGGER.info(&format!("Default configuration successfully saved to {:?}.", path));
+                }
+            },
+            Err(e) => {
+                LOGGER.error(&format!("Error serializing default configuration: {}", e));
+            }
+        }
+        config
+    }
+
+    fn get_config_path() -> Option<PathBuf> {
+        if let Some(proj_dirs) = ProjectDirs::from("com", "Rustle", "Rustle") {
+            let config_dir = proj_dirs.config_dir();
+            Some(config_dir.join("config.yaml"))
+        } else {
+            None
+        }
+    }
+}
