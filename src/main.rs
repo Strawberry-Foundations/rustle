@@ -8,7 +8,7 @@ use std::{
 };
 use tokio::task;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct DiscoveredDevice {
     name: String,
     hostname: String,
@@ -109,24 +109,26 @@ async fn send_file(file_path: &str) {
     }
 
     let devices = discover_devices().await;
-    
     if devices.is_empty() {
         println!("No devices found.");
-        println!("Make sure target devices are running 'rustle announce'");
+        println!("Make sure target devices are running 'rustle daemon'");
         return;
     }
 
     println!("Found {} device(s):", devices.len());
     for (i, device) in devices.iter().enumerate() {
         println!("  [{}] {} ({})", i + 1, device.name, device.hostname);
+        // Zeige alle IPs
+        let ips = get_valid_ips(&device.hostname);
+        for (j, ip) in ips.iter().enumerate() {
+            println!("      [{}] IP: {}", j + 1, ip);
+        }
     }
 
     print!("\nSelect device (1-{}): ", devices.len());
     std::io::Write::flush(&mut std::io::stdout()).unwrap();
-
     let mut input = String::new();
     std::io::stdin().read_line(&mut input).unwrap();
-    
     let choice: usize = match input.trim().parse::<usize>() {
         Ok(n) if n > 0 && n <= devices.len() => n - 1,
         _ => {
@@ -134,12 +136,32 @@ async fn send_file(file_path: &str) {
             return;
         }
     };
-
     let target_device = &devices[choice];
-    println!("Sending transfer request to {}...", target_device.name);
-
-    // Send transfer request
-    match send_transfer_request(target_device, file_path).await {
+    let ips = get_valid_ips(&target_device.hostname);
+    if ips.is_empty() {
+        println!("No valid IP found for device.");
+        return;
+    }
+    println!("Select IP for connection (1-{}): ", ips.len());
+    std::io::Write::flush(&mut std::io::stdout()).unwrap();
+    let mut ip_input = String::new();
+    std::io::stdin().read_line(&mut ip_input).unwrap();
+    let ip_choice: usize = match ip_input.trim().parse::<usize>() {
+        Ok(n) if n > 0 && n <= ips.len() => n - 1,
+        _ => {
+            println!("Invalid IP selection");
+            return;
+        }
+    };
+    let selected_ip = &ips[ip_choice];
+    println!("Sending transfer request to {} ({})...", target_device.name, selected_ip);
+    let device_for_transfer = DiscoveredDevice {
+        name: target_device.name.clone(),
+        hostname: target_device.hostname.clone(),
+        ip: selected_ip.clone(),
+        port: target_device.port,
+    };
+    match send_transfer_request(&device_for_transfer, file_path).await {
         Ok(accepted) => {
             if accepted {
                 println!("Transfer accepted! Sending file...");
@@ -153,6 +175,43 @@ async fn send_file(file_path: &str) {
             println!("Error sending transfer request: {}", e);
         }
     }
+// Liefert alle privaten IPs für einen Hostnamen
+fn get_valid_ips(hostname: &str) -> Vec<String> {
+    use std::net::ToSocketAddrs;
+    let mut ips = Vec::new();
+    let addr_str = format!("{}:8080", hostname);
+    if let Ok(addrs) = addr_str.to_socket_addrs() {
+        for addr in addrs {
+            let ip = addr.ip();
+            if is_private_ip(&ip) {
+                ips.push(ip.to_string());
+            }
+        }
+    }
+    ips
+}
+
+fn is_private_ip(ip: &std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(ipv4) => {
+            let octets = ipv4.octets();
+            // 10.x.x.x
+            if octets[0] == 10 {
+                return true;
+            }
+            // 192.168.x.x
+            if octets[0] == 192 && octets[1] == 168 {
+                return true;
+            }
+            // 172.16.x.x - 172.31.x.x
+            if octets[0] == 172 && (16..=31).contains(&octets[1]) {
+                return true;
+            }
+        }
+        _ => {}
+    }
+    false
+}
 }
 
 
@@ -217,7 +276,7 @@ async fn discover_devices() -> Vec<DiscoveredDevice> {
 
     let mut devices = HashMap::new();
     let start_time = std::time::Instant::now();
-    let timeout = Duration::from_secs(5);
+    let timeout = Duration::from_secs(20);
 
     while start_time.elapsed() < timeout {
         match receiver.recv_timeout(Duration::from_millis(200)) {
