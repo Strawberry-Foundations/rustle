@@ -1,12 +1,17 @@
-use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
-use stblib::notifications::Notifier;
+use mdns_sd::{ServiceDaemon, ServiceEvent};
 use std::{
-    env, time::Duration, collections::HashMap, 
-    net::{TcpListener, TcpStream}, 
-    io::{Write, BufRead, BufReader},
+    collections::HashMap,
+    env,
+    io::{BufRead, BufReader, Write},
+    net::TcpStream,
     path::Path,
+    time::Duration,
 };
-use tokio::task;
+
+use crate::commands::daemon::start_daemon;
+
+pub mod commands;
+pub mod core;
 
 #[derive(Debug, Clone)]
 struct DiscoveredDevice {
@@ -21,7 +26,7 @@ async fn main() {
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
-        print_usage(&args[0]);
+        commands::help::help();
         return;
     }
 
@@ -42,69 +47,16 @@ async fn main() {
         }
         _ => {
             println!("Error: Unknown command '{}'", args[1]);
-            print_usage(&args[0]);
+            commands::help::help();
         }
     }
-}
-
-async fn start_daemon() {
-    println!("Starting Rustle daemon...");
-
-    // Start TCP server for receiving transfer requests
-    let listener = TcpListener::bind("0.0.0.0:8080").expect("Failed to bind to port 8080");
-    
-    // Start mDNS announcement service
-    let mdns = ServiceDaemon::new().expect("Failed to create daemon");
-    let service_type = "_rustle._tcp.local.";
-    let instance_name = "Rustle File Server";
-    let hostname = format!("{}.local.", 
-        whoami::fallible::hostname().unwrap_or_else(|_| "localhost".to_string()));
-    let port = 8080;
-
-    let properties = [("path", "/"), ("version", "1.0")];
-
-    let service_info = ServiceInfo::new(
-        service_type,
-        instance_name,
-        &hostname,
-        "",
-        port,
-        &properties[..],
-    )
-    .expect("Failed to create service info")
-    .enable_addr_auto();
-
-    mdns.register(service_info)
-        .expect("Failed to register service");
-
-    println!("Daemon started successfully");
-    println!("  Service: {} ({})", instance_name, hostname.trim_end_matches('.'));
-    println!("  Listening on port: {}", port);
-    println!("  Ready to receive files and transfer requests");
-    println!("(Press Ctrl+C to stop)");
-
-    // Handle incoming connections
-    task::spawn_blocking(move || {
-        for stream in listener.incoming() {
-            match stream {
-                Ok(stream) => {
-                    if let Err(e) = handle_transfer_request(stream) {
-                        println!("Error handling transfer request: {}", e);
-                    }
-                }
-                Err(e) => {
-                    println!("Connection error: {}", e);
-                }
-            }
-        }
-    }).await.unwrap();
 }
 
 async fn send_file(file_path: &str) {
     println!("Scanning for available devices...");
 
     if !Path::new(file_path).exists() {
-        println!("Error: File '{}' does not exist", file_path);
+        println!("Error: File '{file_path}' does not exist");
         return;
     }
 
@@ -154,7 +106,10 @@ async fn send_file(file_path: &str) {
         }
     };
     let selected_ip = &ips[ip_choice];
-    println!("Sending transfer request to {} ({})...", target_device.name, selected_ip);
+    println!(
+        "Sending transfer request to {} ({})...",
+        target_device.name, selected_ip
+    );
     let device_for_transfer = DiscoveredDevice {
         name: target_device.name.clone(),
         hostname: target_device.hostname.clone(),
@@ -172,28 +127,27 @@ async fn send_file(file_path: &str) {
             }
         }
         Err(e) => {
-            println!("Error sending transfer request: {}", e);
+            println!("Error sending transfer request: {e}");
         }
     }
-// Liefert alle privaten IPs für einen Hostnamen
-fn get_valid_ips(hostname: &str) -> Vec<String> {
-    use std::net::ToSocketAddrs;
-    let mut ips = Vec::new();
-    let addr_str = format!("{}:8080", hostname);
-    if let Ok(addrs) = addr_str.to_socket_addrs() {
-        for addr in addrs {
-            let ip = addr.ip();
-            if is_private_ip(&ip) {
-                ips.push(ip.to_string());
+    // Liefert alle privaten IPs für einen Hostnamen
+    fn get_valid_ips(hostname: &str) -> Vec<String> {
+        use std::net::ToSocketAddrs;
+        let mut ips = Vec::new();
+        let addr_str = format!("{hostname}:49242");
+        if let Ok(addrs) = addr_str.to_socket_addrs() {
+            for addr in addrs {
+                let ip = addr.ip();
+                if is_private_ip(&ip) {
+                    ips.push(ip.to_string());
+                }
             }
         }
+        ips
     }
-    ips
-}
 
-fn is_private_ip(ip: &std::net::IpAddr) -> bool {
-    match ip {
-        std::net::IpAddr::V4(ipv4) => {
+    fn is_private_ip(ip: &std::net::IpAddr) -> bool {
+        if let std::net::IpAddr::V4(ipv4) = ip {
             let octets = ipv4.octets();
             // 10.x.x.x
             if octets[0] == 10 {
@@ -208,64 +162,7 @@ fn is_private_ip(ip: &std::net::IpAddr) -> bool {
                 return true;
             }
         }
-        _ => {}
-    }
-    false
-}
-}
-
-
-fn handle_transfer_request(mut stream: TcpStream) -> Result<(), Box<dyn std::error::Error>> {
-    let mut reader = BufReader::new(&stream);
-    let mut request_line = String::new();
-    reader.read_line(&mut request_line)?;
-
-    let parts: Vec<&str> = request_line.trim().split('|').collect();
-    if parts.len() != 3 || parts[0] != "TRANSFER_REQUEST" {
-        stream.write_all(b"ERROR|Invalid request format\n")?;
-        return Ok(());
-    }
-
-    let sender_name = parts[1];
-    let file_name = parts[2];
-
-    println!("Transfer request from {} for file '{}'", sender_name, file_name);
-
-    // Show notification and get user response
-    let accepted = show_transfer_notification(sender_name, file_name)?;
-
-    if accepted {
-        stream.write_all(b"ACCEPTED\n")?;
-        println!("Transfer accepted");
-        // TODO: Handle actual file transfer
-    } else {
-        stream.write_all(b"DECLINED\n")?;
-        println!("Transfer declined");
-    }
-
-    Ok(())
-}
-
-fn show_transfer_notification(sender: &str, filename: &str) -> Result<bool, Box<dyn std::error::Error>> {
-    let notifier = Notifier::new(
-        "File Transfer Request",
-        &format!("{} wants to send you '{}'", sender, filename),
-        "Rustle",
-        "normal",
-        "/usr/share/icons/hicolor/48x48/apps/folder.png", // Default icon
-        None,
-        30000, // 30 second timeout
-        false,
-    ).build();
-
-    let actions = vec![
-        ("accept".to_string(), "Accept".to_string()),
-        ("decline".to_string(), "Decline".to_string()),
-    ];
-
-    match notifier.send_with_actions_and_wait(actions)? {
-        Some(action) => Ok(action == "accept"),
-        None => Ok(false), // Timeout or closed = decline
+        false
     }
 }
 
@@ -283,8 +180,8 @@ async fn discover_devices() -> Vec<DiscoveredDevice> {
             Ok(event) => {
                 if let ServiceEvent::ServiceResolved(info) = event {
                     let device_id = format!("{}:{}", info.get_hostname(), info.get_port());
-                    
-                    if !devices.contains_key(&device_id) {
+
+                    if let std::collections::hash_map::Entry::Vacant(e) = devices.entry(device_id) {
                         if let Some(ip) = info.get_addresses().iter().next() {
                             let device = DiscoveredDevice {
                                 name: extract_instance_name(info.get_fullname()).to_string(),
@@ -292,7 +189,7 @@ async fn discover_devices() -> Vec<DiscoveredDevice> {
                                 ip: ip.to_string(),
                                 port: info.get_port(),
                             };
-                            devices.insert(device_id, device);
+                            e.insert(device);
                         }
                     }
                 }
@@ -304,7 +201,10 @@ async fn discover_devices() -> Vec<DiscoveredDevice> {
     devices.into_values().collect()
 }
 
-async fn send_transfer_request(device: &DiscoveredDevice, file_path: &str) -> Result<bool, Box<dyn std::error::Error>> {
+async fn send_transfer_request(
+    device: &DiscoveredDevice,
+    file_path: &str,
+) -> Result<bool, Box<dyn std::error::Error>> {
     let sender_name = whoami::fallible::hostname().unwrap_or_else(|_| "Unknown".to_string());
     let file_name = Path::new(file_path)
         .file_name()
@@ -312,8 +212,8 @@ async fn send_transfer_request(device: &DiscoveredDevice, file_path: &str) -> Re
         .unwrap_or("unknown");
 
     let mut stream = TcpStream::connect(format!("{}:{}", device.ip, device.port))?;
-    
-    let request = format!("TRANSFER_REQUEST|{}|{}\n", sender_name, file_name);
+
+    let request = format!("TRANSFER_REQUEST|{sender_name}|{file_name}\n");
     stream.write_all(request.as_bytes())?;
 
     let mut response = String::new();
@@ -343,7 +243,7 @@ async fn scan_services() {
                         let clean_name = service_name
                             .trim_end_matches(".local.")
                             .trim_end_matches("._dns-sd._udp");
-                        println!("  {}", clean_name);
+                        println!("  {clean_name}");
                     }
                 }
             }
@@ -356,17 +256,4 @@ async fn scan_services() {
 
 fn extract_instance_name(fullname: &str) -> &str {
     fullname.split('.').next().unwrap_or(fullname)
-}
-
-fn print_usage(program_name: &str) {
-    println!("Rustle - Fast File Transfer Tool");
-    println!();
-    println!("Usage:");
-    println!("  {} daemon          - Start daemon (mDNS + file transfer server)", program_name);
-    println!("  {} send <file>     - Send a file to discovered device", program_name);
-    println!("  {} scan            - Show all mDNS services", program_name);
-    println!();
-    println!("Examples:");
-    println!("  {} daemon          # Start on devices that should receive files", program_name);
-    println!("  {} send photo.jpg  # Send file to discovered device", program_name);
 }
