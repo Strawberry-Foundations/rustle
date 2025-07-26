@@ -16,8 +16,8 @@ async fn main() {
             println!("Send mode selected.");
             let responder = libmdns::Responder::new().unwrap();
             let _svc = responder.register(
-                "_http._tcp".to_owned(),
-                "libmdns Web Server".to_owned(),
+                "_rustle._tcp.local".to_owned(),
+                "_rustle._tcp.local".to_owned(),
                 8080,
                 &["path=/"],
             );
@@ -31,7 +31,7 @@ async fn main() {
             let service_name = "_rustle._tcp.local";
 
             // Starte die Discovery für 5 Sekunden
-            let listener = all(service_name, Duration::from_secs(5)).unwrap().listen();
+            let listener = all(service_name, Duration::from_secs(100)).unwrap().listen();
 
             println!("Starte Discovery nach Services: {}", service_name);
 
