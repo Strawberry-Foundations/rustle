@@ -1,11 +1,8 @@
-use mdns_sd::{ServiceDaemon, ServiceInfo, ServiceEvent};
-use std::{env, time::Duration};
+use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
+use std::{env, time::Duration, collections::HashSet};
 
 #[tokio::main]
 async fn main() {
-    // Setup logging (optional)
-    env_logger::builder().format_timestamp_millis().init();
-
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
@@ -15,142 +12,152 @@ async fn main() {
 
     match args[1].as_str() {
         "send" => {
-            println!("Send mode selected.");
-            
-            // Create a new mDNS daemon
+            println!("🚀 Starte Rustle File Server...");
+
             let mdns = ServiceDaemon::new().expect("Failed to create daemon");
-            
+
             let service_type = "_rustle._tcp.local.";
             let instance_name = "Rustle File Server";
-            let hostname = format!("{}.local.", whoami::hostname());
+            let hostname = format!("{}.local.", whoami::fallible::hostname().unwrap_or_else(|_| "localhost".to_string()));
             let port = 8080;
-            
-            // TXT properties
+
             let properties = [("path", "/"), ("version", "1.0")];
-            
-            // Create service info with auto address detection
+
             let service_info = ServiceInfo::new(
                 service_type,
                 instance_name,
                 &hostname,
-                "", // Empty means auto-detect addresses
+                "",
                 port,
                 &properties[..],
             )
-            .expect("valid service info")
+            .expect("Failed to create service info")
             .enable_addr_auto();
-            
-            println!("Service registriert: {} als '{}'", service_type, instance_name);
-            println!("Hostname: {}", hostname);
-            println!("Port: {}", port);
-            println!("Warte auf Verbindungen...");
-            
-            // Register the service
-            mdns.register(service_info).expect("Failed to register service");
-            
+
+            mdns.register(service_info)
+                .expect("Failed to register service");
+
+            println!("✅ Service erfolgreich registriert");
+            println!("   Name: {}", instance_name);
+            println!("   Hostname: {}", hostname.trim_end_matches('.'));
+            println!("   Port: {}", port);
+            println!("\n📡 Warte auf eingehende Verbindungen...");
+            println!("   (Drücken Sie Ctrl+C zum Beenden)");
+
             // Keep the service alive
             loop {
-                tokio::time::sleep(Duration::from_secs(10)).await;
+                tokio::time::sleep(Duration::from_secs(30)).await;
             }
         }
         "receive" => {
-            println!("Receive mode selected.");
-            
+            println!("🔍 Suche nach verfügbaren Rustle-Servern...");
+
             let mdns = ServiceDaemon::new().expect("Failed to create daemon");
-            
             let service_type = "_rustle._tcp.local.";
             let receiver = mdns.browse(service_type).expect("Failed to browse");
-            
-            println!("Starte Discovery nach Services: {}", service_type);
-            println!("Suche läuft...");
-            
-            let mut found_services = false;
+
+            let mut found_services = HashSet::new();
             let start_time = std::time::Instant::now();
             let timeout = Duration::from_secs(10);
-            
+
             while start_time.elapsed() < timeout {
-                // Use recv_timeout to avoid blocking forever
-                match receiver.recv_timeout(Duration::from_millis(100)) {
-                    Ok(event) => {
-                        match event {
-                            ServiceEvent::ServiceResolved(info) => {
-                                found_services = true;
-                                println!("Service gefunden! Details:");
-                                println!("  Name: {}", info.get_fullname());
-                                println!("  Hostname: {}", info.get_hostname());
-                                println!("  Port: {}", info.get_port());
-                                println!("  Adressen:");
-                                for addr in info.get_addresses().iter() {
-                                    println!("    {}", addr);
+                match receiver.recv_timeout(Duration::from_millis(200)) {
+                    Ok(event) => match event {
+                        ServiceEvent::ServiceResolved(info) => {
+                            let service_id = format!("{}:{}", info.get_hostname(), info.get_port());
+                            
+                            // Verhindere doppelte Ausgaben für den gleichen Service
+                            if found_services.insert(service_id.clone()) {
+                                println!("\n📍 Server gefunden:");
+                                println!("   Name: {}", extract_instance_name(info.get_fullname()));
+                                println!("   Hostname: {}", info.get_hostname().trim_end_matches('.'));
+                                println!("   Port: {}", info.get_port());
+                                
+                                // Zeige nur die erste (wahrscheinlich lokale) IP-Adresse
+                                if let Some(addr) = info.get_addresses().iter().next() {
+                                    println!("   IP: {}", addr);
                                 }
-                                println!("  TXT-Records:");
+                                
+                                // TXT-Records nur wenn interessant
                                 let properties = info.get_properties();
-                                for property in properties.iter() {
-                                    println!("    {}", property);
+                                if properties.len() > 0 {
+                                    for property in properties.iter().take(3) { // Maximal 3 Properties
+                                        let prop_str = property.to_string();
+                                        if let Some((key, value)) = prop_str.split_once('=') {
+                                            println!("   {}: {}", key, value);
+                                        }
+                                    }
                                 }
-                                println!("---");
-                            }
-                            ServiceEvent::ServiceRemoved(_, fullname) => {
-                                println!("Service entfernt: {}", fullname);
-                            }
-                            other_event => {
-                                println!("Event: {:?}", other_event);
                             }
                         }
-                    }
-                    Err(_) => {
-                        // Timeout, continue loop
-                        continue;
-                    }
+                        ServiceEvent::ServiceRemoved(_, fullname) => {
+                            let instance_name = extract_instance_name(&fullname);
+                            println!("\n❌ Server nicht mehr verfügbar: {}", instance_name);
+                        }
+                        _ => {} // Ignoriere andere Events
+                    },
+                    Err(_) => continue,
                 }
             }
+
+            let found_count = found_services.len();
+            println!("\n🏁 Suche abgeschlossen.");
             
-            if !found_services {
-                println!("Keine Services gefunden. Überprüfen Sie:");
-                println!("1. Dass der Send-Modus auf einem anderen Gerät läuft");
-                println!("2. Dass beide Geräte im gleichen Netzwerk sind");
-                println!("3. Dass keine Firewall mDNS blockiert");
-                println!("4. Versuchen Sie 'cargo run scan' um alle Services zu sehen");
+            if found_count == 0 {
+                println!("❌ Keine Rustle-Server gefunden.");
+                println!("\n💡 Mögliche Lösungen:");
+                println!("   • Stellen Sie sicher, dass ein Server läuft (cargo run send)");
+                println!("   • Überprüfen Sie Ihre Netzwerkverbindung");
+                println!("   • Deaktivieren Sie temporär die Firewall");
+            } else {
+                println!("✅ {} Server gefunden", found_count);
             }
         }
         "scan" => {
-            println!("Scanning for all mDNS services...");
-            
+            println!("🔎 Scanne alle verfügbaren mDNS-Services...");
+
             let mdns = ServiceDaemon::new().expect("Failed to create daemon");
-            
             let service_type = "_services._dns-sd._udp.local.";
             let receiver = mdns.browse(service_type).expect("Failed to browse");
-            
+
             let start_time = std::time::Instant::now();
-            let timeout = Duration::from_secs(10);
-            
-            println!("Suche nach verfügbaren Service-Typen...");
-            
+            let timeout = Duration::from_secs(8);
+            let mut services = HashSet::new();
+
             while start_time.elapsed() < timeout {
-                match receiver.recv_timeout(Duration::from_millis(100)) {
-                    Ok(event) => {
-                        match event {
-                            ServiceEvent::ServiceResolved(info) => {
-                                println!("Found service type: {}", info.get_fullname());
-                            }
-                            other_event => {
-                                println!("Event: {:?}", other_event);
+                match receiver.recv_timeout(Duration::from_millis(200)) {
+                    Ok(event) => match event {
+                        ServiceEvent::ServiceResolved(info) => {
+                            let service_name = info.get_fullname().to_string();
+                            if services.insert(service_name.clone()) {
+                                // Formatiere Service-Namen schöner
+                                let clean_name = service_name
+                                    .trim_end_matches(".local.")
+                                    .trim_end_matches("._dns-sd._udp");
+                                println!("   {}", clean_name);
                             }
                         }
-                    }
-                    Err(_) => {
-                        continue;
-                    }
+                        _ => {}
+                    },
+                    Err(_) => continue,
                 }
             }
-            
-            println!("Scan abgeschlossen.");
+
+            println!("\n🏁 Scan abgeschlossen. {} Service-Typen gefunden.", services.len());
         }
         _ => {
-            println!("Unknown command: {}", args[1]);
-            println!("Usage: {} [send|receive|scan]", args[0]);
+            println!("❌ Unbekannter Befehl: {}", args[1]);
+            println!("\n📖 Verwendung:");
+            println!("   {} send     - Startet einen File-Server", args[0]);
+            println!("   {} receive  - Sucht nach verfügbaren Servern", args[0]);
+            println!("   {} scan     - Zeigt alle mDNS-Services an", args[0]);
         }
     }
+}
+
+// Hilfsfunktion um den Instance-Namen aus dem Fullname zu extrahieren
+fn extract_instance_name(fullname: &str) -> &str {
+    fullname.split('.').next().unwrap_or(fullname)
 }
 
 /* fn main() {
