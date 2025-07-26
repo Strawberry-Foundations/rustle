@@ -1,11 +1,14 @@
+use crate::core::{
+    config::ConfigManager, constants::LOGGER, notifier::show_transfer_notification,
+};
 use mdns_sd::{ServiceDaemon, ServiceInfo};
 use std::{
-    io::{BufRead, BufReader, Write},
+    fs,
+    io::{BufRead, BufReader, Read, Write},
     net::{TcpListener, TcpStream},
+    path::PathBuf,
 };
 use tokio::task;
-
-use crate::core::{constants::LOGGER, notifier::show_transfer_notification};
 
 pub struct Daemon {
     pub port: u16,
@@ -58,7 +61,10 @@ impl Daemon {
 
         LOGGER.info("Service discovery started");
         LOGGER.info(format!("Hostname: {}", hostname.trim_end_matches('.')));
-        LOGGER.info("Listening for incoming connections on port 49242");
+        LOGGER.info(format!(
+            "Listening for incoming connections on port {}",
+            self.port
+        ));
 
         // Handle incoming connections
         task::spawn_blocking(move || {
@@ -87,26 +93,77 @@ pub fn handle_transfer_request(mut stream: TcpStream) -> Result<(), Box<dyn std:
     reader.read_line(&mut request_line)?;
 
     let parts: Vec<&str> = request_line.trim().split('|').collect();
-    if parts.len() != 3 || parts[0] != "TRANSFER_REQUEST" {
+    if parts.len() != 4 || parts[0] != "TRANSFER_REQUEST" {
         stream.write_all(b"ERROR|Invalid request format\n")?;
         return Ok(());
     }
 
     let sender_name = parts[1];
     let file_name = parts[2];
+    let file_size: u64 = parts[3].parse()?;
 
-    LOGGER.info(format!(
-        "Transfer request from {sender_name} for file '{file_name}'"
+    LOGGER.info(&format!(
+        "Transfer request from {} for file '{}' ({} bytes)",
+        sender_name, file_name, file_size
     ));
 
     let accepted = show_transfer_notification(sender_name, file_name)?;
 
     if accepted {
         stream.write_all(b"ACCEPTED\n")?;
-        LOGGER.info("Transfer accepted");
+        LOGGER.info("Transfer accepted. Receiving file...");
+
+        let config_manager = ConfigManager::new();
+        let mut download_path = PathBuf::from(
+            shellexpand::tilde(&config_manager.config.general.default_download_path).to_string(),
+        );
+        download_path.push(file_name);
+
+        match receive_file_data(&mut stream, &download_path, file_size) {
+            Ok(_) => {
+                LOGGER.info(format!(
+                    "File successfully saved to {:?}",
+                    download_path
+                ));
+                stream.write_all(b"TRANSFER_COMPLETE\n")?;
+            }
+            Err(e) => {
+                LOGGER.error(format!("Failed to receive file: {}", e));
+                stream.write_all(format!("ERROR|{}\n", e).as_bytes())?;
+            }
+        }
     } else {
         stream.write_all(b"DECLINED\n")?;
         LOGGER.info("Transfer declined");
+    }
+
+    Ok(())
+}
+
+fn receive_file_data(
+    stream: &mut TcpStream,
+    path: &PathBuf,
+    file_size: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut file = fs::File::create(path)?;
+    let mut reader = BufReader::new(stream);
+    let mut received_bytes: u64 = 0;
+    let mut buffer = [0; 8192]; // 8KB buffer
+
+    while received_bytes < file_size {
+        let bytes_to_read =
+            std::cmp::min(buffer.len() as u64, file_size - received_bytes) as usize;
+        let bytes_read = reader.read(&mut buffer[..bytes_to_read])?;
+
+        if bytes_read == 0 {
+            return Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "Connection closed prematurely",
+            )));
+        }
+
+        file.write_all(&buffer[..bytes_read])?;
+        received_bytes += bytes_read as u64;
     }
 
     Ok(())
