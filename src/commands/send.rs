@@ -1,68 +1,71 @@
 use std::{io::{BufRead, BufReader, Write}, net::TcpStream, path::Path};
 
 use crate::core::{
-    device::{DiscoveredDevice, discover_devices},
-    net::get_valid_ips,
+    constants::LOGGER, device::{discover_devices, DiscoveredDevice}, net::get_valid_ips
 };
 
 pub async fn send_file(file_path: &str) {
-    println!("Scanning for available devices...");
+    LOGGER.info("Scanning for available devices...");
 
     if !Path::new(file_path).exists() {
-        println!("Error: File '{file_path}' does not exist");
+        LOGGER.error(&format!("Error: File '{file_path}' does not exist"));
         return;
     }
 
     let devices = discover_devices().await;
     if devices.is_empty() {
-        println!("No devices found.");
-        println!("Make sure target devices are running 'rustle daemon'");
+        LOGGER.error("No devices found.");
+        LOGGER.warning("Make sure target devices are running 'rustle daemon'");
         return;
     }
 
-    println!("Found {} device(s):", devices.len());
+    LOGGER.info(&format!("Found {} device(s):", devices.len()));
     for (i, device) in devices.iter().enumerate() {
-        println!("  [{}] {} ({})", i + 1, device.name, device.hostname);
-        // Zeige alle IPs
+        LOGGER.info(&format!("  [{}] {} ({})", i + 1, device.name, device.hostname));
         let ips = get_valid_ips(&device.hostname);
         for (j, ip) in ips.iter().enumerate() {
-            println!("      [{}] IP: {}", j + 1, ip);
+            LOGGER.info(&format!("      [{}] IP: {}", j + 1, ip));
         }
     }
 
-    print!("\nSelect device (1-{}): ", devices.len());
+    LOGGER.info(&format!("Select device (1-{}): ", devices.len()));
     std::io::Write::flush(&mut std::io::stdout()).unwrap();
+    
     let mut input = String::new();
     std::io::stdin().read_line(&mut input).unwrap();
+
     let choice: usize = match input.trim().parse::<usize>() {
         Ok(n) if n > 0 && n <= devices.len() => n - 1,
         _ => {
-            println!("Invalid selection");
+            LOGGER.warning("Invalid selection");
             return;
         }
     };
     let target_device = &devices[choice];
     let ips = get_valid_ips(&target_device.hostname);
     if ips.is_empty() {
-        println!("No valid IP found for device.");
+        LOGGER.warning("No valid IP found for device.");
         return;
     }
-    println!("Select IP for connection (1-{}): ", ips.len());
+    LOGGER.info(&format!("Select IP for connection (1-{}): ", ips.len()));
     std::io::Write::flush(&mut std::io::stdout()).unwrap();
     let mut ip_input = String::new();
     std::io::stdin().read_line(&mut ip_input).unwrap();
+    
     let ip_choice: usize = match ip_input.trim().parse::<usize>() {
         Ok(n) if n > 0 && n <= ips.len() => n - 1,
         _ => {
-            println!("Invalid IP selection");
+            LOGGER.warning("Invalid IP selection");
             return;
         }
     };
+
     let selected_ip = &ips[ip_choice];
-    println!(
+    LOGGER.info(&format!(
         "Sending transfer request to {} ({})...",
         target_device.name, selected_ip
-    );
+    ));
+
     let device_for_transfer = DiscoveredDevice {
         name: target_device.name.clone(),
         hostname: target_device.hostname.clone(),
@@ -72,17 +75,16 @@ pub async fn send_file(file_path: &str) {
     match send_transfer_request(&device_for_transfer, file_path).await {
         Ok(accepted) => {
             if accepted {
-                println!("Transfer accepted! Sending file...");
-                println!("File transfer completed successfully!");
+                LOGGER.info("Transfer accepted! Sending file...");
+                LOGGER.info("File transfer completed successfully!");
             } else {
-                println!("Transfer was declined by the recipient.");
+                LOGGER.warning("Transfer was declined by the recipient.");
             }
         }
         Err(e) => {
-            println!("Error sending transfer request: {e}");
+            LOGGER.error(&format!("Error sending transfer request: {e}"));
         }
     }
-    // Liefert alle privaten IPs für einen Hostnamen
 }
 
 async fn send_transfer_request(

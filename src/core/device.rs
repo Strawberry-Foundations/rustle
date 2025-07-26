@@ -16,10 +16,10 @@ pub async fn discover_devices() -> Vec<DiscoveredDevice> {
 
     let mut devices = HashMap::new();
     let start_time = std::time::Instant::now();
-    let timeout = Duration::from_secs(8);
+    let timeout = Duration::from_secs(10);
 
     while start_time.elapsed() < timeout {
-        match receiver.recv_timeout(Duration::from_millis(200)) {
+        match receiver.recv_timeout(Duration::from_millis(300)) {
             Ok(event) => {
                 if let ServiceEvent::ServiceResolved(info) = event {
                     let device_id = format!("{}:{}", info.get_hostname(), info.get_port());
