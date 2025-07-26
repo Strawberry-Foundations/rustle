@@ -112,7 +112,7 @@ async fn main() {
             println!("Scanning for all mDNS services...");
             
             let mdns = ServiceDaemon::new().expect("Failed to create mDNS daemon");
-            let receiver = mdns.browse("_services._dns-sd._udp.local").expect("Failed to browse");
+            let receiver = mdns.browse("_services._dns-sd._udp.local.").expect("Failed to browse");
             
             let timeout = tokio::time::sleep(Duration::from_secs(10));
             tokio::pin!(timeout);
