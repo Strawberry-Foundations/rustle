@@ -26,8 +26,8 @@ async fn main() {
     }
 
     match args[1].as_str() {
-        "announce" => {
-            start_announcement_service().await;
+        "daemon" => {
+            start_daemon().await;
         }
         "send" => {
             if args.len() < 3 {
@@ -36,9 +36,6 @@ async fn main() {
                 return;
             }
             send_file(&args[2]).await;
-        }
-        "receive" => {
-            start_receive_daemon().await;
         }
         "scan" => {
             scan_services().await;
@@ -50,9 +47,13 @@ async fn main() {
     }
 }
 
-async fn start_announcement_service() {
-    println!("Starting Rustle announcement service...");
+async fn start_daemon() {
+    println!("Starting Rustle daemon...");
 
+    // Start TCP server for receiving transfer requests
+    let listener = TcpListener::bind("0.0.0.0:8080").expect("Failed to bind to port 8080");
+    
+    // Start mDNS announcement service
     let mdns = ServiceDaemon::new().expect("Failed to create daemon");
     let service_type = "_rustle._tcp.local.";
     let instance_name = "Rustle File Server";
@@ -76,17 +77,27 @@ async fn start_announcement_service() {
     mdns.register(service_info)
         .expect("Failed to register service");
 
-    println!("Service registered successfully");
-    println!("  Name: {}", instance_name);
-    println!("  Hostname: {}", hostname.trim_end_matches('.'));
-    println!("  Port: {}", port);
-    println!("\nListening for connections...");
+    println!("Daemon started successfully");
+    println!("  Service: {} ({})", instance_name, hostname.trim_end_matches('.'));
+    println!("  Listening on port: {}", port);
+    println!("  Ready to receive files and transfer requests");
     println!("(Press Ctrl+C to stop)");
 
-    // Keep the service alive
-    loop {
-        tokio::time::sleep(Duration::from_secs(30)).await;
-    }
+    // Handle incoming connections
+    task::spawn_blocking(move || {
+        for stream in listener.incoming() {
+            match stream {
+                Ok(stream) => {
+                    if let Err(e) = handle_transfer_request(stream) {
+                        println!("Error handling transfer request: {}", e);
+                    }
+                }
+                Err(e) => {
+                    println!("Connection error: {}", e);
+                }
+            }
+        }
+    }).await.unwrap();
 }
 
 async fn send_file(file_path: &str) {
@@ -144,30 +155,6 @@ async fn send_file(file_path: &str) {
     }
 }
 
-async fn start_receive_daemon() {
-    println!("Starting receive daemon...");
-    
-    // Start TCP server for receiving transfer requests
-    let listener = TcpListener::bind("0.0.0.0:8080").expect("Failed to bind to port 8080");
-    println!("Listening on port 8080 for transfer requests...");
-    println!("(Press Ctrl+C to stop)");
-
-    // Handle incoming connections
-    task::spawn_blocking(move || {
-        for stream in listener.incoming() {
-            match stream {
-                Ok(stream) => {
-                    if let Err(e) = handle_transfer_request(stream) {
-                        println!("Error handling transfer request: {}", e);
-                    }
-                }
-                Err(e) => {
-                    println!("Connection error: {}", e);
-                }
-            }
-        }
-    }).await.unwrap();
-}
 
 fn handle_transfer_request(mut stream: TcpStream) -> Result<(), Box<dyn std::error::Error>> {
     let mut reader = BufReader::new(&stream);
@@ -316,13 +303,11 @@ fn print_usage(program_name: &str) {
     println!("Rustle - Fast File Transfer Tool");
     println!();
     println!("Usage:");
-    println!("  {} announce        - Start announcement service (run as daemon)", program_name);
+    println!("  {} daemon          - Start daemon (mDNS + file transfer server)", program_name);
     println!("  {} send <file>     - Send a file to discovered device", program_name);
-    println!("  {} receive         - Start receive daemon", program_name);
     println!("  {} scan            - Show all mDNS services", program_name);
     println!();
     println!("Examples:");
-    println!("  {} announce        # Start on target device", program_name);
-    println!("  {} receive         # Start receiver daemon", program_name);
+    println!("  {} daemon          # Start on devices that should receive files", program_name);
     println!("  {} send photo.jpg  # Send file to discovered device", program_name);
 }
