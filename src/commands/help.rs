@@ -1,5 +1,5 @@
 use crate::core::constants::VERSION;
-use stblib::colors::{BOLD, C_RESET, CYAN, GREEN, MAGENTA, RED, RESET, UNDERLINE, WHITE};
+use libstrawberry::colors::{BOLD, C_RESET, CYAN, GREEN, MAGENTA, RED, RESET, UNDERLINE, WHITE};
 
 pub fn help() {
     println!(

@@ -57,7 +57,7 @@ impl Daemon {
             LOGGER.panic_crash(format!("Failed to register service: {e}"));
         });
 
-        LOGGER.default("Daemon started successfully");
+        LOGGER.ok("Daemon started successfully");
 
         LOGGER.info("Service discovery started");
         LOGGER.info(format!("Hostname: {}", hostname.trim_end_matches('.')));
@@ -102,9 +102,8 @@ pub fn handle_transfer_request(mut stream: TcpStream) -> Result<(), Box<dyn std:
     let file_name = parts[2];
     let file_size: u64 = parts[3].parse()?;
 
-    LOGGER.info(&format!(
-        "Transfer request from {} for file '{}' ({} bytes)",
-        sender_name, file_name, file_size
+    LOGGER.info(format!(
+        "Transfer request from {sender_name} for file '{file_name}' ({file_size} bytes)"
     ));
 
     let accepted = show_transfer_notification(sender_name, file_name)?;
@@ -122,14 +121,13 @@ pub fn handle_transfer_request(mut stream: TcpStream) -> Result<(), Box<dyn std:
         match receive_file_data(&mut stream, &download_path, file_size) {
             Ok(_) => {
                 LOGGER.info(format!(
-                    "File successfully saved to {:?}",
-                    download_path
+                    "File successfully saved to {download_path:?}"
                 ));
                 stream.write_all(b"TRANSFER_COMPLETE\n")?;
             }
             Err(e) => {
-                LOGGER.error(format!("Failed to receive file: {}", e));
-                stream.write_all(format!("ERROR|{}\n", e).as_bytes())?;
+                LOGGER.error(format!("Failed to receive file: {e}"));
+                stream.write_all(format!("ERROR|{e}\n").as_bytes())?;
             }
         }
     } else {

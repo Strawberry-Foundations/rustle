@@ -42,6 +42,12 @@ pub struct ConfigManager {
     _config_path: PathBuf,
 }
 
+impl Default for ConfigManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ConfigManager {
     pub fn new() -> Self {
         let config_path = Self::get_config_path().expect("Could not find a valid home directory.");
@@ -59,17 +65,17 @@ impl ConfigManager {
             Ok(content) => {
                 match serde_yaml::from_str(&content) {
                     Ok(config) => {
-                        LOGGER.info(&format!("Configuration successfully loaded from {:?}.", path));
+                        LOGGER.info(format!("Configuration successfully loaded from {path:?}."));
                         config
                     },
                     Err(e) => {
-                        LOGGER.error(&format!("Error parsing configuration file: {}. Loading defaults.", e));
+                        LOGGER.error(format!("Error parsing configuration file: {e}. Loading defaults."));
                         Config::default()
                     }
                 }
             },
             Err(e) => {
-                LOGGER.error(&format!("Error reading configuration file: {}. Loading defaults.", e));
+                LOGGER.error(format!("Error reading configuration file: {e}. Loading defaults."));
                 Config::default()
             }
         }
@@ -79,20 +85,20 @@ impl ConfigManager {
         let config = Config::default();
         if let Some(parent) = path.parent() {
             if let Err(e) = fs::create_dir_all(parent) {
-                LOGGER.error(&format!("Could not create configuration directory: {}", e));
+                LOGGER.error(format!("Could not create configuration directory: {e}"));
                 return config;
             }
         }
         match serde_yaml::to_string(&config) {
             Ok(yaml) => {
                 if let Err(e) = fs::write(path, yaml) {
-                    LOGGER.error(&format!("Error writing default configuration: {}", e));
+                    LOGGER.error(format!("Error writing default configuration: {e}"));
                 } else {
-                    LOGGER.info(&format!("Default configuration successfully saved to {:?}.", path));
+                    LOGGER.info(format!("Default configuration successfully saved to {path:?}."));
                 }
             },
             Err(e) => {
-                LOGGER.error(&format!("Error serializing default configuration: {}", e));
+                LOGGER.error(format!("Error serializing default configuration: {e}"));
             }
         }
         config

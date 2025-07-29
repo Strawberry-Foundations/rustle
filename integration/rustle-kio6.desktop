@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Service
+X-KDE-ServiceTypes=KonqPopupMenu/Plugin
+Actions=sendRustle;
+MimeType=all/allfiles;
+
+[Desktop Action sendRustle]
+Name=Send with Rustle
+Name[de]=Mit Rustle teilen
+Exec=/home/julian/Projekte/rustle/target/debug/rustle gui %F
+Icon=network-wireless-hotspot

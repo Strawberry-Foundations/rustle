@@ -1,4 +1,4 @@
-use stblib::notifications::Notifier;
+use libstrawberry::notifications::Notifier;
 
 pub fn show_transfer_notification(sender: &str, filename: &str) -> Result<bool, Box<dyn std::error::Error>> {
     let notifier = Notifier::new(

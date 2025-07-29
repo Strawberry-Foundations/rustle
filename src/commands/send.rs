@@ -16,14 +16,14 @@ pub async fn send_file(file_path: &str) {
 
     let file_path_obj = Path::new(file_path);
     if !file_path_obj.exists() {
-        LOGGER.error(&format!("Error: File '{file_path}' does not exist"));
+        LOGGER.error(format!("Error: File '{file_path}' does not exist"));
         return;
     }
 
     let file_size = match fs::metadata(file_path) {
         Ok(meta) => meta.len(),
         Err(e) => {
-            LOGGER.error(&format!("Could not read file metadata: {e}"));
+            LOGGER.error(format!("Could not read file metadata: {e}"));
             return;
         }
     };
@@ -35,9 +35,9 @@ pub async fn send_file(file_path: &str) {
         return;
     }
 
-    LOGGER.info(&format!("Found {} device(s):", devices.len()));
+    LOGGER.info(format!("Found {} device(s):", devices.len()));
     for (i, device) in devices.iter().enumerate() {
-        LOGGER.info(&format!(
+        LOGGER.info(format!(
             "  [{}] {} ({})",
             i + 1,
             device.name,
@@ -45,11 +45,11 @@ pub async fn send_file(file_path: &str) {
         ));
         let ips = get_valid_ips(&device.hostname);
         for (j, ip) in ips.iter().enumerate() {
-            LOGGER.info(&format!("      [{}] IP: {}", j + 1, ip));
+            LOGGER.info(format!("      [{}] IP: {}", j + 1, ip));
         }
     }
 
-    LOGGER.info(&format!("Select device (1-{}): ", devices.len()));
+    LOGGER.info(format!("Select device (1-{}): ", devices.len()));
     std::io::Write::flush(&mut std::io::stdout()).unwrap();
 
     let mut input = String::new();
@@ -70,7 +70,7 @@ pub async fn send_file(file_path: &str) {
         return;
     }
 
-    LOGGER.info(&format!("Select IP for connection (1-{}): ", ips.len()));
+    LOGGER.info(format!("Select IP for connection (1-{}): ", ips.len()));
     std::io::Write::flush(&mut std::io::stdout()).unwrap();
 
     let mut ip_input = String::new();
@@ -85,7 +85,7 @@ pub async fn send_file(file_path: &str) {
     };
 
     let selected_ip = &ips[ip_choice];
-    LOGGER.info(&format!(
+    LOGGER.info(format!(
         "Sending transfer request to {} ({})...",
         target_device.name, selected_ip
     ));
@@ -104,7 +104,7 @@ pub async fn send_file(file_path: &str) {
     )) {
         Ok(s) => s,
         Err(e) => {
-            LOGGER.error(&format!("Failed to connect: {}", e));
+            LOGGER.error(format!("Failed to connect: {e}"));
             return;
         }
     };
@@ -115,19 +115,19 @@ pub async fn send_file(file_path: &str) {
                 LOGGER.info("Transfer accepted! Sending file...");
                 match stream_file_data(&mut stream, file_path).await {
                     Ok(_) => LOGGER.info("File transfer completed successfully!"),
-                    Err(e) => LOGGER.error(&format!("File transfer failed: {}", e)),
+                    Err(e) => LOGGER.error(format!("File transfer failed: {e}")),
                 }
             } else {
                 LOGGER.warning("Transfer was declined by the recipient.");
             }
         }
         Err(e) => {
-            LOGGER.error(&format!("Error sending transfer request: {e}"));
+            LOGGER.error(format!("Error sending transfer request: {e}"));
         }
     }
 }
 
-async fn stream_file_data(
+pub async fn stream_file_data(
     stream: &mut TcpStream,
     file_path: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -142,14 +142,13 @@ async fn stream_file_data(
     if confirmation.trim() == "TRANSFER_COMPLETE" {
         Ok(())
     } else {
-        Err(Box::new(std::io::Error::new(
-            std::io::ErrorKind::Other,
+        Err(Box::new(std::io::Error::other(
             format!("Receiver error: {}", confirmation.trim()),
         )))
     }
 }
 
-async fn send_transfer_request(
+pub async fn send_transfer_request(
     stream: &mut TcpStream,
     file_path: &str,
     file_size: u64,
@@ -161,8 +160,7 @@ async fn send_transfer_request(
         .unwrap_or("unknown");
 
     let request = format!(
-        "TRANSFER_REQUEST|{}|{}|{}\n",
-        sender_name, file_name, file_size
+        "TRANSFER_REQUEST|{sender_name}|{file_name}|{file_size}\n"
     );
     stream.write_all(request.as_bytes())?;
 

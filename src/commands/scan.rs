@@ -34,7 +34,7 @@ pub async fn scan_services() {
         }
     }
 
-    LOGGER.default(format!(
+    LOGGER.ok(format!(
         "Scan completed in {:.2?}. Found {} service types.",
         start_time.elapsed(),
         service_types.len()
@@ -74,7 +74,7 @@ pub async fn scan_services() {
         }
     }
 
-    LOGGER.default(format!(
+    LOGGER.ok(format!(
         "Scan completed. Found {} service instances.",
         all_instances.len()
     ));
