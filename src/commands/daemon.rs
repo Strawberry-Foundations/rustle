@@ -91,6 +91,14 @@ pub fn handle_transfer_request(mut stream: TcpStream) -> Result<(), Box<dyn std:
     reader.read_line(&mut request_line)?;
 
     let parts: Vec<&str> = request_line.trim().split('|').collect();
+
+    if parts.len() >= 1 && parts[0] == "INFO" {
+        let hostname = whoami::hostname().unwrap_or_else(|_| "localhost".to_string());
+        let response = format!("INFO|{}|Rustle|1.0\n", hostname);
+        stream.write_all(response.as_bytes())?;
+        return Ok(());
+    }
+
     if parts.len() != 4 || parts[0] != "TRANSFER_REQUEST" {
         stream.write_all(b"ERROR|Invalid request format\n")?;
         return Ok(());

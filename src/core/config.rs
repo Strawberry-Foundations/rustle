@@ -14,6 +14,8 @@ pub struct Config {
 pub struct NetworkConfig {
     pub port: u16,
     pub discovery_timeout_secs: u64,
+    pub static_peers: Option<Vec<String>>,
+    pub scan_subnets: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -28,6 +30,8 @@ impl Default for Config {
             network: NetworkConfig {
                 port: 49242,
                 discovery_timeout_secs: 5,
+                static_peers: Some(vec![]),
+                scan_subnets: Some(vec![]),
             },
             general: GeneralConfig {
                 default_download_path: "~/Downloads".to_string(),
