@@ -152,121 +152,92 @@ pub async fn discover_devices_continuously(devices: Arc<Mutex<Vec<DiscoveredDevi
         "Starting continuous mDNS scan for '{service_type}'..."
     ));
 
+    // Initial mDNS setup
+    let mdns = ServiceDaemon::new().expect("Failed to create daemon");
+    let receiver = mdns.browse(service_type).expect("Failed to browse");
+
     loop {
-        let mdns = ServiceDaemon::new().expect("Failed to create daemon");
-        let mut local_devices = HashMap::new();
-        let scan_duration = Duration::from_secs(8);
-        let start_time = std::time::Instant::now();
-
-        let poll_interval = Duration::from_secs(2);
-        while start_time.elapsed() < scan_duration {
-            let receiver = match mdns.browse(service_type) {
-                Ok(r) => r,
-                Err(e) => {
-                    LOGGER.error(format!("Failed to browse: {e}"));
-                    break;
-                }
-            };
-
-            let poll_start = std::time::Instant::now();
-            while poll_start.elapsed() < poll_interval {
-                match receiver.recv_timeout(Duration::from_millis(300)) {
-                    Ok(event) => {
-                        let info = match event {
-                            ServiceEvent::ServiceResolved(info) => Some(info),
-                            _ => None,
-                        };
-                        if let Some(info) = info {
-                            let device_id = format!("{}:{}", info.get_hostname(), info.get_port());
-                            if local_devices.contains_key(&device_id) {
-                                continue;
-                            }
-
-                            let ip_addr = info
-                                .get_addresses_v4()
-                                .iter()
-                                .find(|addr| !addr.is_loopback())
-                                .map(|ip| ip.to_string())
-                                .or_else(|| {
-                                    info.get_addresses()
-                                        .iter()
-                                        .map(|ip| ip.to_string())
-                                        .next()
-                                });
-
-                            if let Some(ip) = ip_addr {
-                                let device = DiscoveredDevice {
-                                    name: extract_instance_name(info.get_fullname()).to_string(),
-                                    hostname: info.get_hostname().trim_end_matches('.').to_string(),
-                                    ip,
-                                    port: info.get_port(),
-                                };
-                                local_devices.insert(device_id, device);
-                            }
-                        }
-                    }
-                    Err(_) => continue,
-                }
-            }
-        }
-
-        // --- Static Peers & Subnet Scanning ---
+        // --- 1. Static Peers & Subnet Scanning (Background Task) ---
+        let devices_clone = devices.clone();
+        
         let mut scanning_targets = Vec::new();
-
         if let Some(static_peers) = &CFG.config.network.static_peers {
             for peer in static_peers {
                 scanning_targets.push(peer.clone());
             }
         }
-
         if let Some(subnets) = &CFG.config.network.scan_subnets {
             for subnet_str in subnets {
                 if let Ok(net) = subnet_str.parse::<Ipv4Net>() {
                     for ip in net.hosts() {
                         scanning_targets.push(ip.to_string());
                     }
-                } else {
-                    LOGGER.warning(format!("Invalid subnet format in config: {}", subnet_str));
                 }
             }
         }
-        
         scanning_targets.sort();
         scanning_targets.dedup();
 
+                        // Spawn background task for active scanning
+        let devices_cloned_for_static = devices.clone();
         if !scanning_targets.is_empty() {
-             let mut set = tokio::task::JoinSet::new();
-             for target in scanning_targets {
-                 set.spawn(async move {
-                     check_static_peer(&target).await
-                 });
-             }
-             
-             while let Some(res) = set.join_next().await {
-                 if let Ok(Some(device)) = res {
-                     let device_id = format!("{}:{}", device.hostname, device.port);
-                     local_devices.insert(device_id, device);
-                 }
-             }
+            tokio::spawn(async move {
+                let mut set = tokio::task::JoinSet::new();
+                for target in scanning_targets {
+                    set.spawn(async move {
+                        check_static_peer(&target).await
+                    });
+                }
+                
+                while let Some(res) = set.join_next().await {
+                    if let Ok(Some(device)) = res {
+                         let mut shared = devices_cloned_for_static.lock().unwrap();
+                         if !shared.iter().any(|d| d.hostname == device.hostname && d.ip == device.ip) {
+                             LOGGER.info(format!("Found static/subnet device: {} ({})", device.name, device.ip));
+                             shared.push(device);
+                         }
+                    }
+                }
+            });
         }
 
-        if !local_devices.is_empty() {
-            let mut shared_devices = devices.lock().unwrap();
-            for new_device in local_devices.values() {
-                if !shared_devices
-                    .iter()
-                    .any(|d| d.hostname == new_device.hostname && d.ip == new_device.ip)
-                {
-                    LOGGER.info(format!(
-                        "Found new device: {} at {}",
-                        new_device.name, new_device.ip
-                    ));
-                    shared_devices.push(new_device.clone());
+        // --- 2. mDNS Event Loop (Main Task) ---
+        // Run this loop for a while, processing events immediately
+        let loop_duration = Duration::from_secs(10);
+        let start_time = std::time::Instant::now();
+        let mdns = ServiceDaemon::new().expect("Failed to create daemon");
+        let receiver = mdns.browse(service_type).expect("Failed to browse");
+
+        while start_time.elapsed() < loop_duration {
+            match receiver.recv_timeout(Duration::from_millis(500)) {
+                Ok(event) => {
+                    if let ServiceEvent::ServiceResolved(info) = event {
+                         let ip_addr = info.get_addresses_v4()
+                            .iter()
+                            .find(|addr| !addr.is_loopback())
+                            .map(|ip| ip.to_string())
+                            .or_else(|| info.get_addresses().iter().map(|ip| ip.to_string()).next());
+
+                         if let Some(ip) = ip_addr {
+                             let new_device = DiscoveredDevice {
+                                 name: extract_instance_name(info.get_fullname()).to_string(),
+                                 hostname: info.get_hostname().trim_end_matches('.').to_string(),
+                                 ip: ip.clone(),
+                                 port: info.get_port(),
+                             };
+
+                             let mut shared = devices.lock().unwrap();
+                             // Check if already exists to avoid duplicates/flicker
+                             if !shared.iter().any(|d| d.hostname == new_device.hostname && d.ip == new_device.ip) {
+                                 LOGGER.info(format!("Found mDNS device: {} ({})", new_device.name, new_device.ip));
+                                 shared.push(new_device);
+                             }
+                         }
+                    }
                 }
+                Err(_) => continue, // Timeout, just loop again
             }
         }
-
-        sleep(Duration::from_secs(5)).await;
     }
 }
 

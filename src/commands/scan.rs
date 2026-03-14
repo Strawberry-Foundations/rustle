@@ -4,12 +4,13 @@ use std::time::Duration;
 use crate::core::constants::LOGGER;
 
 pub async fn scan_services() {
-    LOGGER.info("Scanning for all mDNS services...");
+    LOGGER.info("Scanning for all mDNS services... (Press Ctrl+C to stop)");
 
     let mdns = ServiceDaemon::new().unwrap_or_else(|_| {
         LOGGER.panic("Failed to create daemon");
     });
 
+    // Start browsing for all services
     let receiver = mdns
         .browse("_services._dns-sd._udp.local.")
         .unwrap_or_else(|_| {
@@ -17,65 +18,45 @@ pub async fn scan_services() {
         });
 
     let mut service_types = std::collections::HashSet::new();
-    let start_time = std::time::Instant::now();
-    let timeout = Duration::from_secs(8);
 
-    while start_time.elapsed() < timeout {
-        match receiver.recv_timeout(Duration::from_millis(200)) {
-            Ok(event) => {
-                if let ServiceEvent::ServiceFound(service_type, _) = event {
+    LOGGER.info("Listening for services and instances concurrently...");
+    
+    let mdns = std::sync::Arc::new(mdns);
+    
+    loop {
+        // Poll for new service types
+        if let Ok(event) = receiver.recv_timeout(Duration::from_millis(500)) {
+            match event {
+                ServiceEvent::ServiceFound(service_type, _) => {
                     if service_types.insert(service_type.clone()) {
                         let clean_name = service_type.trim_end_matches(".local.");
-                        LOGGER.info(format!("Found service type: {clean_name}"));
+                        LOGGER.info(format!("Found NEW service type: {clean_name}"));
+                        
+                        // Spawn a browser for this type
+                        let mdns_clone = mdns.clone();
+                        let type_clone = service_type.clone();
+                        
+                        tokio::spawn(async move {
+                             if let Ok(inst_receiver) = mdns_clone.browse(&type_clone) {
+                                 while let Ok(event) = inst_receiver.recv_async().await {
+                                     match event {
+                                         ServiceEvent::ServiceResolved(info) => {
+                                             LOGGER.info(format!(
+                                                 "  [Resolved] {} at {}:{}",
+                                                 info.get_fullname(),
+                                                 info.get_hostname().trim_end_matches('.'),
+                                                 info.get_port()
+                                             ));
+                                         }
+                                          _ => {}
+                                     }
+                                 }
+                             }
+                        });
                     }
                 }
-            }
-            Err(_) => continue,
-        }
-    }
-
-    LOGGER.ok(format!(
-        "Scan completed in {:.2?}. Found {} service types.",
-        start_time.elapsed(),
-        service_types.len()
-    ));
-
-    let mut all_instances = std::collections::HashSet::new();
-    for service_type in &service_types {
-        LOGGER.info(format!("Browsing instances for: {service_type}"));
-        if let Ok(inst_receiver) = mdns.browse(service_type) {
-            let inst_start = std::time::Instant::now();
-            let inst_timeout = Duration::from_secs(3);
-
-            while inst_start.elapsed() < inst_timeout {
-                match inst_receiver.recv_timeout(Duration::from_millis(100)) {
-                    Ok(event) => match event {
-                        ServiceEvent::ServiceFound(_, fullname) => {
-                            if all_instances.insert(fullname.clone()) {
-                                LOGGER.info(format!("  Found: {fullname}"));
-                            }
-                        }
-                        ServiceEvent::ServiceResolved(info) => {
-                            let fullname = info.get_fullname().to_string();
-                            if all_instances.insert(fullname.clone()) {
-                                LOGGER.info(format!(
-                                    "  Resolved: {} at {}:{}",
-                                    fullname,
-                                    info.get_hostname().trim_end_matches('.'),
-                                    info.get_port()
-                                ));
-                            }
-                        }
-                        _ => {}
-                    },
-                    Err(_) => continue,
-                }
+                _ => {}
             }
         }
     }
-
-    LOGGER.ok(format!(
-        "Scan completed. Found {} service instances.",
-        all_instances.len()
-    ));
 }
