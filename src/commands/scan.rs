@@ -7,13 +7,13 @@ pub async fn scan_services() {
     LOGGER.info("Scanning for all mDNS services...");
 
     let mdns = ServiceDaemon::new().unwrap_or_else(|_| {
-        LOGGER.error_panic("Failed to create daemon");
+        LOGGER.panic("Failed to create daemon");
     });
 
     let receiver = mdns
         .browse("_services._dns-sd._udp.local.")
         .unwrap_or_else(|_| {
-            LOGGER.error_panic("Failed to browse all service types");
+            LOGGER.panic("Failed to browse all service types");
         });
 
     let mut service_types = std::collections::HashSet::new();

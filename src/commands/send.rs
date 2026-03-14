@@ -153,7 +153,7 @@ pub async fn send_transfer_request(
     file_path: &str,
     file_size: u64,
 ) -> Result<bool, Box<dyn std::error::Error>> {
-    let sender_name = whoami::fallible::hostname().unwrap_or_else(|_| "Unknown".to_string());
+    let sender_name = whoami::hostname().unwrap_or_else(|_| "Unknown".to_string());
     let file_name = Path::new(file_path)
         .file_name()
         .and_then(|name| name.to_str())

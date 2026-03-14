@@ -65,10 +65,7 @@ pub async fn discover_devices() -> Vec<DiscoveredDevice> {
                             .or_else(|| {
                                 info.get_addresses()
                                     .iter()
-                                    .map(|ip| match ip {
-                                        std::net::IpAddr::V4(v4) => v4.to_string(),
-                                        std::net::IpAddr::V6(v6) => v6.to_string(),
-                                    })
+                                    .map(|ip| ip.to_string())
                                     .next()
                             });
                             
@@ -148,10 +145,7 @@ pub async fn discover_devices_continuously(devices: Arc<Mutex<Vec<DiscoveredDevi
                                 .or_else(|| {
                                     info.get_addresses()
                                         .iter()
-                                        .map(|ip| match ip {
-                                            std::net::IpAddr::V4(v4) => v4.to_string(),
-                                            std::net::IpAddr::V6(v6) => v6.to_string(),
-                                        })
+                                        .map(|ip| ip.to_string())
                                         .next()
                                 });
 

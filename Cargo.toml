@@ -4,15 +4,15 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-libstrawberry = { version = "1.2.0", features = ["notifications"] }
-mdns-sd = "0.13.11"
-tokio = { version = "1.47.0", features = ["full"] }
-env_logger = "0.11.5"
-whoami = "1.5.2"
+libstrawberry = { version = "1.4.4", features = ["notifications"] }
+mdns-sd = "0.18.2"
+tokio = { version = "1.50.0", features = ["full"] }
+env_logger = "0.11.9"
+whoami = "2.1.1"
 lazy_static = "1.5.0"
 serde_yaml = "0.9.34"
-serde = { version = "1.0.219", features = ["derive"] }
+serde = { version = "1.0.228", features = ["derive"] }
 directories = "6.0.0"
-shellexpand = "3.1.1"
-egui = "0.32.0"
-eframe = "0.32.0"
+shellexpand = "3.1.2"
+egui = "0.33.3"
+eframe = "0.33.3"

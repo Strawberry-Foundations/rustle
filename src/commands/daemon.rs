@@ -1,6 +1,4 @@
-use crate::core::{
-    config::ConfigManager, constants::LOGGER, notifier::show_transfer_notification,
-};
+use crate::core::{config::ConfigManager, constants::LOGGER, notifier::show_transfer_notification};
 use mdns_sd::{ServiceDaemon, ServiceInfo};
 use std::{
     fs,
@@ -24,18 +22,18 @@ impl Daemon {
         LOGGER.info("Starting Rustle daemon");
 
         let listener = TcpListener::bind(format!("0.0.0.0:{}", self.port)).unwrap_or_else(|e| {
-            LOGGER.panic_crash(format!("Failed to bind to port {}: {e}", self.port));
+            LOGGER.panic(format!("Failed to bind to port {}: {e}", self.port));
         });
 
-        let mdns = ServiceDaemon::new().unwrap_or_else(|e| {
-            LOGGER.panic_crash(format!("Failed to create daemon: {e}"));
+        let mdns: ServiceDaemon = ServiceDaemon::new().unwrap_or_else(|e| {
+            LOGGER.panic(format!("Failed to create daemon: {e}"));
         });
 
         let service_type = "_rustle._tcp.local.";
         let instance_name = "Rustle";
         let hostname = format!(
             "{}.local.",
-            whoami::fallible::hostname().unwrap_or_else(|_| "localhost".to_string())
+            whoami::hostname().unwrap_or_else(|_| "localhost".to_string())
         );
 
         let properties = [("path", "/"), ("version", "1.0")];
@@ -49,12 +47,12 @@ impl Daemon {
             &properties[..],
         )
         .unwrap_or_else(|e| {
-            LOGGER.panic_crash(format!("Failed to create service info: {e}"));
+            LOGGER.panic(format!("Failed to create service info: {e}"));
         })
         .enable_addr_auto();
 
         mdns.register(service_info).unwrap_or_else(|e| {
-            LOGGER.panic_crash(format!("Failed to register service: {e}"));
+            LOGGER.panic(format!("Failed to register service: {e}"));
         });
 
         LOGGER.ok("Daemon started successfully");
@@ -120,9 +118,7 @@ pub fn handle_transfer_request(mut stream: TcpStream) -> Result<(), Box<dyn std:
 
         match receive_file_data(&mut stream, &download_path, file_size) {
             Ok(_) => {
-                LOGGER.info(format!(
-                    "File successfully saved to {download_path:?}"
-                ));
+                LOGGER.info(format!("File successfully saved to {download_path:?}"));
                 stream.write_all(b"TRANSFER_COMPLETE\n")?;
             }
             Err(e) => {
@@ -149,8 +145,7 @@ fn receive_file_data(
     let mut buffer = [0; 8192]; // 8KB buffer
 
     while received_bytes < file_size {
-        let bytes_to_read =
-            std::cmp::min(buffer.len() as u64, file_size - received_bytes) as usize;
+        let bytes_to_read = std::cmp::min(buffer.len() as u64, file_size - received_bytes) as usize;
         let bytes_read = reader.read(&mut buffer[..bytes_to_read])?;
 
         if bytes_read == 0 {
