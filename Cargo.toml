@@ -1,13 +1,12 @@
 [package]
 name = "rustle"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 
 [dependencies]
 libstrawberry = { version = "1.4.4", features = ["notifications"] }
 mdns-sd = "0.18.2"
 tokio = { version = "1.50.0", features = ["full"] }
-env_logger = "0.11.9"
 whoami = "2.1.1"
 lazy_static = "1.5.0"
 serde_yaml = "0.9.34"
