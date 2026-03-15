@@ -156,7 +156,7 @@ pub fn handle_transfer_request(mut stream: TcpStream) -> Result<(), Box<dyn std:
             let sound_data = include_bytes!("../../assets/notification.ogg");
             let cursor = Cursor::new(sound_data);
             
-            if let Ok(player) = rodio::play(&handle.mixer(), cursor) {
+            if let Ok(player) = rodio::play(handle.mixer(), cursor) {
                 player.sleep_until_end();
             }
         }
