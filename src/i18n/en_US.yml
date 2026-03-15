@@ -33,13 +33,13 @@ en_US:
   send_status_data: "Sending file data..."
   send_status_wait_conf: "Waiting for confirmation..."
   send_status_complete: "Transfer complete!"
-  send_status_error: "Error: {}"
+  send_status_error: "Error: %s"
   send_status_panic: "Thread panicked during transfer."
 
   # Notifier (Transfer Status)
   notifier_transfer_started: "File transfer started..."
-  notifier_transfer_success: "File '{}' received successfully!"
-  notifier_transfer_error: "Error receiving '{}': {}"
+  notifier_transfer_success: "File '%s' received successfully!"
+  notifier_transfer_error: "Error receiving '%s': %s"
   notifier_success_title: "Transfer Complete"
   notifier_error_title: "Transfer Error"
   notifier_info_title: "Rustle Info"

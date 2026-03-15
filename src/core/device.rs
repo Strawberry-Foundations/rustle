@@ -238,16 +238,23 @@ pub async fn discover_devices_continuously(devices: Arc<Mutex<Vec<DiscoveredDevi
         if !scanning_targets.is_empty() {
             let devices_clone = devices.clone();
             let targets = scanning_targets.clone();
+
             tokio::spawn(async move {
+                let mut tasks = Vec::new();
                 for target in targets {
-                    if let Some(device) = check_static_peer(&target).await {
-                         let mut shared = devices_clone.lock().unwrap();
-                         if !shared.iter().any(|d| d.hostname == device.hostname && d.ip == device.ip) {
-                             LOGGER.info(format!("Found static/subnet device: {} ({})", device.name, device.ip));
-                             shared.push(device);
-                         }
-                    }
+                    let dev_clone = devices_clone.clone();
+                    tasks.push(tokio::spawn(async move {
+                        if let Some(device) = check_static_peer(&target).await {
+                             let mut shared = dev_clone.lock().unwrap();
+                             if !shared.iter().any(|d| d.hostname == device.hostname && d.ip == device.ip) {
+                                 LOGGER.info(format!("Found static/subnet device: {} ({})", device.name, device.ip));
+                                 shared.push(device);
+                             }
+                        }
+                    }));
                 }
+                // Wait for all checks to complete so we don't spam network
+                futures::future::join_all(tasks).await;
             });
         }
 
