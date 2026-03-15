@@ -7,5 +7,5 @@ MimeType=all/allfiles;
 [Desktop Action sendRustle]
 Name=Send with Rustle
 Name[de]=Mit Rustle teilen
-Exec=/home/julian/Projekte/rustle/target/debug/rustle gui %F
+Exec=/home/julian/Projects/rustle/target/debug/rustle gui %F
 Icon=network-wireless-hotspot
