@@ -4,13 +4,15 @@ use std::path::{Path, PathBuf};
 use directories::ProjectDirs;
 use crate::core::constants::LOGGER;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
     pub network: NetworkConfig,
     pub general: GeneralConfig,
+    #[serde(default)]
+    pub user: UserConfig,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct NetworkConfig {
     pub port: u16,
     pub discovery_timeout_secs: u64,
@@ -18,10 +20,25 @@ pub struct NetworkConfig {
     pub scan_subnets: Option<Vec<String>>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct GeneralConfig {
     pub default_download_path: String,
     pub show_notifications: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct UserConfig {
+    pub display_name: Option<String>,
+    pub avatar_path: Option<String>,
+}
+
+impl Default for UserConfig {
+    fn default() -> Self {
+        UserConfig {
+            display_name: Some(whoami::hostname().unwrap()),
+            avatar_path: None,
+        }
+    }
 }
 
 impl Default for Config {
@@ -37,6 +54,7 @@ impl Default for Config {
                 default_download_path: "~/Downloads".to_string(),
                 show_notifications: true,
             },
+            user: UserConfig::default(),
         }
     }
 }
@@ -62,6 +80,11 @@ impl ConfigManager {
             Self::create_default_config(&config_path)
         };
         ConfigManager { config, _config_path: config_path }
+    }
+
+    pub fn save(&self) -> Result<(), std::io::Error> {
+        let yaml = serde_yaml::to_string(&self.config).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        fs::write(&self._config_path, yaml)
     }
 
     fn load_from_file(path: &Path) -> Config {

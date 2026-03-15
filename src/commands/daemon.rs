@@ -1,4 +1,4 @@
-use crate::core::{config::ConfigManager, constants::LOGGER, notifier::show_transfer_notification};
+use crate::core::{constants::{CFG, LOGGER}, notifier::show_transfer_notification};
 use mdns_sd::{ServiceDaemon, ServiceInfo};
 use std::{
     fs,
@@ -7,6 +7,7 @@ use std::{
     path::PathBuf,
 };
 use tokio::task;
+use crate::core::config::ConfigManager;
 
 pub struct Daemon {
     pub port: u16,
@@ -30,13 +31,26 @@ impl Daemon {
         });
 
         let service_type = "_rustle._tcp.local.";
-        let instance_name = "Rustle";
+        
+        let display_name = CFG.config.user.display_name.clone().unwrap_or_else(|| {
+            whoami::hostname().unwrap().to_string()
+        });
+        
+        let instance_name = &display_name;
+        
         let hostname = format!(
             "{}.local.",
             whoami::hostname().unwrap_or_else(|_| "localhost".to_string())
         );
 
-        let properties = [("path", "/"), ("version", "1.0")];
+        let mut properties = vec![("path", "/".to_string()), ("version", "1.0".to_string())];
+        
+        if let Some(avatar) = &CFG.config.user.avatar_path {
+            properties.push(("avatar", avatar.clone()));
+        }
+
+        // Convert properties to required format for mdns-sd
+        let properties_refs: Vec<(&str, &str)> = properties.iter().map(|(k, v)| (*k, v.as_str())).collect();
 
         let service_info = ServiceInfo::new(
             service_type,
@@ -44,7 +58,7 @@ impl Daemon {
             &hostname,
             "",
             self.port,
-            &properties[..],
+            &properties_refs[..],
         )
         .unwrap_or_else(|e| {
             LOGGER.panic(format!("Failed to create service info: {e}"));

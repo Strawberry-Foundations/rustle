@@ -1,7 +1,7 @@
 use std::{env, sync::{Arc, Mutex}};
 
 use crate::{
-    commands::{daemon::Daemon, gui::show_send_dialog, scan::scan_services, send::send_file},
+    commands::{daemon::Daemon, gui::{show_send_dialog, show_settings_dialog}, scan::scan_services, send::send_file},
     core::{constants::CFG, device::{discover_devices_continuously, DiscoveredDevice}},
 };
 
@@ -18,6 +18,9 @@ async fn main() {
     }
 
     match args[1].as_str() {
+        "settings" => {
+            show_settings_dialog();
+        }
         "daemon" => {
             let daemon = Daemon::new(CFG.config.network.port, "localhost".to_string());
             daemon.start().await;

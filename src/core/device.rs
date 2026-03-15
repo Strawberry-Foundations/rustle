@@ -1,7 +1,6 @@
 use mdns_sd::{ServiceDaemon, ServiceEvent};
 use std::{
     collections::HashMap,
-    io::{Read, Write},
     sync::{Arc, Mutex},
     time::Duration,
 };

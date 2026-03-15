@@ -9,8 +9,26 @@ use std::{
 };
 
 use crate::commands::send::stream_file_data;
+use crate::core::config::ConfigManager;
 use crate::core::constants::LOGGER;
 use crate::core::device::DiscoveredDevice;
+
+pub fn show_settings_dialog() {
+    let options = NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([400.0, 500.0])
+            .with_resizable(false),
+        ..Default::default()
+    };
+
+    if let Err(e) = eframe::run_native(
+        "Rustle Settings",
+        options,
+        Box::new(|_cc| Ok(Box::new(SettingsDialog::new()))),
+    ) {
+        eprintln!("Error running settings GUI: {e}");
+    }
+}
 
 pub fn show_send_dialog(devices: Arc<Mutex<Vec<DiscoveredDevice>>>, file_path: String) {
     let options = NativeOptions {
@@ -26,6 +44,96 @@ pub fn show_send_dialog(devices: Arc<Mutex<Vec<DiscoveredDevice>>>, file_path: S
         Box::new(|_cc| Ok(Box::new(SendDialog::new(devices, file_path)))),
     ) {
         eprintln!("Error running native GUI: {e}");
+    }
+}
+
+struct SettingsDialog {
+    config_manager: ConfigManager,
+    display_name: String,
+    avatar_path: String,
+    download_path: String,
+    show_notifications: bool,
+    status_msg: Option<String>,
+}
+
+impl SettingsDialog {
+    fn new() -> Self {
+        let config_manager = ConfigManager::new();
+        let config = &config_manager.config;
+        
+        Self {
+            display_name: config.user.display_name.clone().unwrap_or_default(),
+            avatar_path: config.user.avatar_path.clone().unwrap_or_default(),
+            download_path: config.general.default_download_path.clone(),
+            show_notifications: config.general.show_notifications,
+            config_manager,
+            status_msg: None,
+        }
+    }
+
+    fn save(&mut self) {
+        self.config_manager.config.user.display_name = if self.display_name.trim().is_empty() {
+            None
+        } else {
+            Some(self.display_name.clone())
+        };
+
+        self.config_manager.config.user.avatar_path = if self.avatar_path.trim().is_empty() {
+            None
+        } else {
+            Some(self.avatar_path.clone())
+        };
+
+        self.config_manager.config.general.default_download_path = self.download_path.clone();
+        self.config_manager.config.general.show_notifications = self.show_notifications;
+
+        match self.config_manager.save() {
+            Ok(_) => self.status_msg = Some("Settings saved successfully!".to_string()),
+            Err(e) => self.status_msg = Some(format!("Error saving settings: {}", e)),
+        }
+    }
+}
+
+impl eframe::App for SettingsDialog {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.heading("Rustle Settings");
+            ui.add_space(10.0);
+
+            ui.group(|ui| {
+                ui.label("User Profile");
+                ui.horizontal(|ui| {
+                    ui.label("Display Name:");
+                    ui.text_edit_singleline(&mut self.display_name);
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Avatar Path:");
+                    ui.text_edit_singleline(&mut self.avatar_path);
+                });
+            });
+
+            ui.add_space(10.0);
+
+            ui.group(|ui| {
+                ui.label("General");
+                ui.horizontal(|ui| {
+                    ui.label("Download Path:");
+                    ui.text_edit_singleline(&mut self.download_path);
+                });
+                ui.checkbox(&mut self.show_notifications, "Show Notifications");
+            });
+
+            ui.add_space(20.0);
+
+            if ui.button("Save Settings").clicked() {
+                self.save();
+            }
+
+            if let Some(msg) = &self.status_msg {
+                ui.add_space(10.0);
+                ui.label(msg);
+            }
+        });
     }
 }
 
