@@ -113,6 +113,21 @@ pub fn handle_transfer_request(mut stream: TcpStream) -> Result<(), Box<dyn std:
         return Ok(());
     }
 
+    if !parts.is_empty() && parts[0] == "GET_AVATAR" {
+        if let Some(avatar_path) = &CFG.config.user.avatar_path {
+            if let Ok(mut file) = fs::File::open(avatar_path) {
+                let metadata = file.metadata()?;
+                let size = metadata.len();
+                let response = format!("AVATAR|{}\n", size);
+                stream.write_all(response.as_bytes())?;
+                std::io::copy(&mut file, &mut stream)?;
+                return Ok(());
+            }
+        }
+        stream.write_all(b"AVATAR|0\n")?;
+        return Ok(());
+    }
+
     if parts.len() != 4 || parts[0] != "TRANSFER_REQUEST" {
         stream.write_all(b"ERROR|Invalid request format\n")?;
         return Ok(());

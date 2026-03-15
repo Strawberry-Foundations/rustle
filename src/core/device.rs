@@ -5,6 +5,8 @@ use std::{
     time::Duration,
 };
 use ipnet::Ipv4Net;
+use tokio::io::{AsyncReadExt, AsyncWriteExt, AsyncBufReadExt};
+use tokio::net::TcpStream;
 
 use crate::core::constants::{CFG, LOGGER};
 
@@ -14,6 +16,8 @@ pub struct DiscoveredDevice {
     pub hostname: String,
     pub ip: String,
     pub port: u16,
+    pub display_name: Option<String>,
+    pub avatar_data: Option<Vec<u8>>,
 }
 
 pub async fn discover_devices() -> Vec<DiscoveredDevice> {
@@ -29,28 +33,17 @@ pub async fn discover_devices() -> Vec<DiscoveredDevice> {
         timeout.as_secs()
     ));
 
+    // Browse services
+    let receiver = mdns.browse(service_type).expect("Failed to browse");
+
     let poll_interval = Duration::from_secs(2);
     while start_time.elapsed() < timeout {
-        let receiver = match mdns.browse(service_type) {
-            Ok(r) => r,
-            Err(e) => {
-                LOGGER.error(format!("Failed to browse: {e}"));
-                break;
-            }
-        };
-
         let poll_start = std::time::Instant::now();
 
         while poll_start.elapsed() < poll_interval {
             match receiver.recv_timeout(Duration::from_millis(300)) {
                 Ok(event) => {
-                    // LOGGER.info(&format!("Received mDNS event: {:?}", event));
-                    let info = match event {
-                        ServiceEvent::ServiceResolved(info) => Some(info),
-                        _ => None,
-                    };
-
-                    if let Some(info) = info {
+                    if let ServiceEvent::ServiceResolved(info) = event {
                         let device_id = format!("{}:{}", info.get_hostname(), info.get_port());
 
                         if devices.contains_key(&device_id) {
@@ -70,12 +63,32 @@ pub async fn discover_devices() -> Vec<DiscoveredDevice> {
                             });
                             
                         if let Some(ip) = ip_addr {
-                            let device = DiscoveredDevice {
+                            let mut device = DiscoveredDevice {
                                 name: extract_instance_name(info.get_fullname()).to_string(),
                                 hostname: info.get_hostname().trim_end_matches('.').to_string(),
-                                ip,
+                                ip: ip.clone(),
                                 port: info.get_port(),
+                                display_name: None,
+                                avatar_data: None,
                             };
+
+                            // Try to fetch avatar (sync for CLI scan? No, keep async)
+                            // We can't await easily inside this loop if we want to process fast.
+                            // But for CLI scan, it's fine.
+                            
+                            // Note: for cleaner code we could spawn but for CLI we just want results.
+                            // Let's cheat a bit and just block or use block_on if discover_devices is called from main via tokio.
+                            // discover_devices is async so we can await. But we are in a loop.
+                            // We will do it sequentially for CLI scan simplicity.
+                            
+                            // BUT wait, fetch_avatar is async.
+                            // We cannot block scan loop too long.
+                            // We will spawn a task? No, `devices` is local HashMap.
+                            // We can just await here.
+                            if let Some(avatar) = fetch_avatar(&device.ip, device.port).await {
+                                device.avatar_data = Some(avatar);
+                            }
+
                             LOGGER.info(format!(
                                 "Discovered device: {} at {}",
                                 device.name, device.ip
@@ -102,8 +115,6 @@ pub async fn discover_devices() -> Vec<DiscoveredDevice> {
 }
 
 async fn check_static_peer(host_or_ip: &str) -> Option<DiscoveredDevice> {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::TcpStream;
     
     let addr_str = if host_or_ip.contains(':') {
         host_or_ip.to_string()
@@ -129,16 +140,49 @@ async fn check_static_peer(host_or_ip: &str) -> Option<DiscoveredDevice> {
                             let ip = peer_addr.ip().to_string();
                             let port = peer_addr.port();
                             
-                            return Some(DiscoveredDevice {
+                            let mut device = DiscoveredDevice {
                                 name: hostname.clone(),
                                 hostname,
-                                ip,
-                                port
-                            });
+                                ip: ip.clone(),
+                                port,
+                                display_name: None,
+                                avatar_data: None,
+                            };
+                            
+                            if let Some(avatar) = fetch_avatar(&ip, port).await {
+                                device.avatar_data = Some(avatar);
+                            }
+                            
+                            return Some(device);
                         }
                     }
             }
         }
+    None
+}
+
+async fn fetch_avatar(ip: &str, port: u16) -> Option<Vec<u8>> {
+    let addr = format!("{}:{}", ip, port);
+    // Short timeout for avatar fetch
+    if let Ok(Ok(mut stream)) = tokio::time::timeout(Duration::from_millis(500), TcpStream::connect(addr)).await {
+        if stream.write_all(b"GET_AVATAR\n").await.is_ok() {
+            let mut reader = tokio::io::BufReader::new(&mut stream);
+            let mut line = String::new();
+            if reader.read_line(&mut line).await.is_ok() {
+                let parts: Vec<&str> = line.trim().split('|').collect();
+                if parts.len() >= 2 && parts[0] == "AVATAR" {
+                     if let Ok(size) = parts[1].trim().parse::<u64>() {
+                         if size > 0 && size < 10_000_000 { // Limit size just in case
+                             let mut buffer = vec![0u8; size as usize];
+                             if reader.read_exact(&mut buffer).await.is_ok() {
+                                 return Some(buffer);
+                             }
+                         }
+                     }
+                }
+            }
+        }
+    }
     None
 }
 
@@ -148,14 +192,11 @@ pub async fn discover_devices_continuously(devices: Arc<Mutex<Vec<DiscoveredDevi
         "Starting continuous mDNS scan for '{service_type}'..."
     ));
 
-    // Initial mDNS setup
     let mdns = ServiceDaemon::new().expect("Failed to create daemon");
-    let _receiver = mdns.browse(service_type).expect("Failed to browse");
+    let receiver = mdns.browse(service_type).expect("Failed to browse");
 
     loop {
-        // --- 1. Static Peers & Subnet Scanning (Background Task) ---
-        let _devices_clone = devices.clone();
-        
+        // --- 1. Static Peers Scanning ---
         let mut scanning_targets = Vec::new();
         if let Some(static_peers) = &CFG.config.network.static_peers {
             for peer in static_peers {
@@ -174,20 +215,13 @@ pub async fn discover_devices_continuously(devices: Arc<Mutex<Vec<DiscoveredDevi
         scanning_targets.sort();
         scanning_targets.dedup();
 
-                        // Spawn background task for active scanning
-        let devices_cloned_for_static = devices.clone();
         if !scanning_targets.is_empty() {
+            let devices_clone = devices.clone();
+            let targets = scanning_targets.clone();
             tokio::spawn(async move {
-                let mut set = tokio::task::JoinSet::new();
-                for target in scanning_targets {
-                    set.spawn(async move {
-                        check_static_peer(&target).await
-                    });
-                }
-                
-                while let Some(res) = set.join_next().await {
-                    if let Ok(Some(device)) = res {
-                         let mut shared = devices_cloned_for_static.lock().unwrap();
+                for target in targets {
+                    if let Some(device) = check_static_peer(&target).await {
+                         let mut shared = devices_clone.lock().unwrap();
                          if !shared.iter().any(|d| d.hostname == device.hostname && d.ip == device.ip) {
                              LOGGER.info(format!("Found static/subnet device: {} ({})", device.name, device.ip));
                              shared.push(device);
@@ -197,14 +231,9 @@ pub async fn discover_devices_continuously(devices: Arc<Mutex<Vec<DiscoveredDevi
             });
         }
 
-        // --- 2. mDNS Event Loop (Main Task) ---
-        // Run this loop for a while, processing events immediately
-        let loop_duration = Duration::from_secs(10);
-        let start_time = std::time::Instant::now();
-        let mdns = ServiceDaemon::new().expect("Failed to create daemon");
-        let receiver = mdns.browse(service_type).expect("Failed to browse");
-
-        while start_time.elapsed() < loop_duration {
+        // --- 2. mDNS Event Loop ---
+        let loop_start = std::time::Instant::now();
+        while loop_start.elapsed() < Duration::from_secs(5) {
             match receiver.recv_timeout(Duration::from_millis(500)) {
                 Ok(event) => {
                     if let ServiceEvent::ServiceResolved(info) = event {
@@ -215,23 +244,47 @@ pub async fn discover_devices_continuously(devices: Arc<Mutex<Vec<DiscoveredDevi
                             .or_else(|| info.get_addresses().iter().map(|ip| ip.to_string()).next());
 
                          if let Some(ip) = ip_addr {
-                             let new_device = DiscoveredDevice {
-                                 name: extract_instance_name(info.get_fullname()).to_string(),
-                                 hostname: info.get_hostname().trim_end_matches('.').to_string(),
-                                 ip: ip.clone(),
-                                 port: info.get_port(),
-                             };
-
-                             let mut shared = devices.lock().unwrap();
-                             // Check if already exists to avoid duplicates/flicker
-                             if !shared.iter().any(|d| d.hostname == new_device.hostname && d.ip == new_device.ip) {
-                                 LOGGER.info(format!("Found mDNS device: {} ({})", new_device.name, new_device.ip));
-                                 shared.push(new_device);
+                             let ip_clone = ip.clone();
+                             let port = info.get_port();
+                             let name = extract_instance_name(info.get_fullname()).to_string();
+                             let hostname = info.get_hostname().trim_end_matches('.').to_string();
+                             
+                             let devices_ref = devices.clone();
+                             
+                             // Already known?
+                             {
+                                 let shared = devices_ref.lock().unwrap();
+                                 if shared.iter().any(|d| d.hostname == hostname && d.ip == ip_clone) {
+                                     continue;
+                                 }
                              }
+                             
+                             tokio::spawn(async move {
+                                 let mut device = DiscoveredDevice {
+                                     name: name.clone(),
+                                     hostname: hostname.clone(),
+                                     ip: ip_clone.clone(),
+                                     port,
+                                     display_name: None,
+                                     avatar_data: None,
+                                 };
+                                 
+                                 // Fetch avatar
+                                 if let Some(avatar) = fetch_avatar(&device.ip, device.port).await {
+                                     device.avatar_data = Some(avatar);
+                                 }
+                                 
+                                 // Add to list
+                                 let mut shared = devices_ref.lock().unwrap();
+                                 if !shared.iter().any(|d| d.hostname == device.hostname && d.ip == device.ip) {
+                                     LOGGER.info(format!("Found mDNS device: {} ({}) [Avatar: {}]", device.name, device.ip, device.avatar_data.is_some()));
+                                     shared.push(device);
+                                 }
+                             });
                          }
                     }
                 }
-                Err(_) => continue, // Timeout, just loop again
+                Err(_) => continue,
             }
         }
     }

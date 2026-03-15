@@ -1,5 +1,6 @@
 use eframe::{Frame, NativeOptions, egui};
-use egui::{Color32, Sense, Stroke, vec2};
+use egui::{Color32, Sense, Stroke, vec2, TextureHandle, TextureOptions};
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::{
@@ -33,8 +34,8 @@ pub fn show_settings_dialog() {
 pub fn show_send_dialog(devices: Arc<Mutex<Vec<DiscoveredDevice>>>, file_path: String) {
     let options = NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([400.0, 380.0])
-            .with_resizable(false),
+            .with_inner_size([500.0, 420.0]) // Slightly larger for better grid
+            .with_resizable(true),
         ..Default::default()
     };
 
@@ -110,6 +111,7 @@ impl eframe::App for SettingsDialog {
                     ui.label("Avatar Path:");
                     ui.text_edit_singleline(&mut self.avatar_path);
                 });
+                ui.small("Use a local file path (e.g., /home/user/pic.png).");
             });
 
             ui.add_space(10.0);
@@ -142,6 +144,7 @@ struct SendDialog {
     selected: Option<usize>,
     file_path: String,
     file_name: String,
+    texture_cache: HashMap<String, TextureHandle>,
 }
 
 impl SendDialog {
@@ -157,131 +160,191 @@ impl SendDialog {
             selected: None,
             file_path,
             file_name,
+            texture_cache: HashMap::new(),
+        }
+    }
+
+    fn load_texture(&mut self, ctx: &egui::Context, device_id: &str, data: &[u8]) {
+        if self.texture_cache.contains_key(device_id) {
+            return;
+        }
+
+        if let Ok(image) = image::load_from_memory(data) {
+            let size = [image.width() as usize, image.height() as usize];
+            let image_buffer = image.to_rgba8();
+            let pixels = image_buffer.as_flat_samples();
+            let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                size,
+                pixels.as_slice(),
+            );
+
+            let texture = ctx.load_texture(
+                device_id,
+                color_image,
+                TextureOptions::default()
+            );
+            self.texture_cache.insert(device_id.to_string(), texture);
         }
     }
 }
 
 impl eframe::App for SendDialog {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
-        // Auto-refresh the GUI to show new devices
-        ctx.request_repaint();
+        // Auto-refresh to find devices
+        ctx.request_repaint_after(std::time::Duration::from_millis(500));
 
+        // 1. Pre-load textures for any devices that have avatar_data but no texture yet.
+        //    We must do this outside the closure to avoid double-borrowing `self`.
+        let mut to_load = Vec::new();
+        {
+            let devices = self.devices.lock().unwrap();
+            for dev in devices.iter() {
+                let id = format!("{}:{}", dev.hostname, dev.ip);
+                if dev.avatar_data.is_some() && !self.texture_cache.contains_key(&id) {
+                    to_load.push((id, dev.avatar_data.clone().unwrap()));
+                }
+            }
+        }
+        for (id, data) in to_load {
+            self.load_texture(ctx, &id, &data);
+        }
+
+        // 2. Render UI
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.add_space(16.0);
+            ui.add_space(10.0);
             ui.vertical_centered(|ui| {
-                ui.heading("Send with Rustle");
-                ui.add_space(4.0);
-                ui.label(format!("Sending: {}", self.file_name));
-                ui.add_space(4.0);
-                ui.label("Select a device to send to:");
+                ui.heading("Send File");
+                ui.label(format!("File: {}", self.file_name));
             });
             ui.add_space(20.0);
 
-            // --- Device Grid ---
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                // Lock the devices vector for reading
-                let devices = self.devices.lock().unwrap();
+            let devices_guard = self.devices.lock().unwrap();
+            if devices_guard.is_empty() {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(50.0);
+                    ui.spinner();
+                    ui.add_space(10.0);
+                    ui.label("Searching for devices...");
+                });
+            } else {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing = vec2(20.0, 20.0);
+                        
+                        for (idx, device) in devices_guard.iter().enumerate() {
+                            let device_id = format!("{}:{}", device.hostname, device.ip);
+                            let is_selected = self.selected == Some(idx);
+                            
+                            // Each device is a vertical group
+                            ui.vertical(|ui| {
+                                ui.set_min_width(100.0);
+                                ui.set_max_width(100.0);
+                                
+                                let (response, painter) = ui.allocate_painter(vec2(80.0, 80.0), Sense::click());
+                                
+                                if response.clicked() {
+                                    self.selected = Some(idx);
+                                }
 
-                if devices.is_empty() {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(40.0);
-                        ui.label("🔍 Searching for devices...");
-                        ui.spinner();
-                    });
-                } else {
-                    // Center the grid horizontally
-                    let grid_width = 3.0 * 80.0 + 2.0 * ui.style().spacing.item_spacing.x;
-                    ui.add_space((ui.available_width() - grid_width) / 2.0);
+                                let rect = response.rect;
+                                let center = rect.center();
+                                let radius = rect.width() / 2.0;
 
-                    egui::Grid::new("device_grid")
-                        .spacing(ui.style().spacing.item_spacing)
-                        .show(ui, |ui| {
-                            for (i, dev_name) in devices.iter().enumerate() {
-                                ui.vertical_centered(|ui| {
-                                    let is_selected = self.selected == Some(i);
-                                    let (response, painter) =
-                                        ui.allocate_painter(vec2(80.0, 80.0), Sense::click());
-
-                                    let rect = response.rect;
-                                    let center = rect.center();
-                                    let radius = rect.width() / 2.0 - 5.0;
-
-                                    // Draw circle
-                                    let bg_color = if is_selected {
-                                        Color32::from_rgb(0, 120, 255)
-                                    } else {
-                                        ctx.style().visuals.widgets.inactive.bg_fill
-                                    };
+                                // Background for avatar
+                                let bg_color = if is_selected {
+                                    Color32::from_rgb(0, 120, 215) // Highlight
+                                } else {
+                                    Color32::from_gray(220) // Light gray
+                                };
+                                
+                                // Draw Avatar or Fallback
+                                if let Some(texture) = self.texture_cache.get(&device_id) {
+                                    // Draw texture with rounding (circular)
+                                    // egui::Painter doesn't have a direct "image_with_rounding" easily accessible 
+                                    // without a specific shader or mesh. 
+                                    // Just drawing a square image inside the circle for now 
+                                    // or using an Image widget would have been easier if we weren't doing manual layout.
+                                    // Let's use a square image clipped by a circle? 
+                                    // Actually, egui Images support rounding.
+                                    // But we allocated a painter. 
+                                    // Let's just draw the image rect.
+                                    painter.image(
+                                        texture.id(),
+                                        rect,
+                                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                        Color32::WHITE
+                                    );
+                                    
+                                    // Draw selection ring
+                                    if is_selected {
+                                         painter.circle_stroke(center, radius + 4.0, Stroke::new(3.0, bg_color));
+                                    }
+                                } else {
+                                    // Fallback: Circle with initials
                                     painter.circle_filled(center, radius, bg_color);
-
-                                    // Draw initials
-                                    let initials = dev_name
-                                        .hostname
-                                        .split_whitespace()
-                                        .filter_map(|s| s.chars().next())
-                                        .take(2)
-                                        .collect::<String>()
+                                    if is_selected {
+                                        painter.circle_stroke(center, radius + 2.0, Stroke::new(2.0, Color32::WHITE));
+                                    }
+                                    
+                                    // Initial
+                                    let initial = device.name.chars().next()
+                                        .unwrap_or('?')
+                                        .to_string()
                                         .to_uppercase();
+                                    
                                     painter.text(
                                         center,
                                         egui::Align2::CENTER_CENTER,
-                                        initials,
+                                        initial,
                                         egui::FontId::proportional(32.0),
                                         Color32::WHITE,
                                     );
-
-                                    // Draw selection ring
-                                    if is_selected {
-                                        painter.circle_stroke(
-                                            center,
-                                            radius + 2.0,
-                                            Stroke::new(2.0, Color32::from_rgb(0, 120, 255)),
-                                        );
-                                    }
-
-                                    if response.clicked() {
-                                        self.selected = Some(i);
-                                    }
-
-                                    ui.label(&dev_name.hostname);
-                                });
-
-                                if (i + 1) % 3 == 0 {
-                                    ui.end_row();
                                 }
-                            }
-                        });
-                }
-            });
 
-            // --- Send Button ---
-            // Use a separator and push the button to the bottom
-            ui.add_space(ui.available_height() - 60.0);
-            ui.separator();
-            ui.add_space(8.0);
-            ui.vertical_centered(|ui| {
-                let send_button =
-                    egui::Button::new("Send").min_size(vec2(ui.available_width() - 32.0, 40.0));
-
-                let is_enabled = self.selected.is_some();
-                if ui.add_enabled(is_enabled, send_button).clicked()
-                    && let Some(idx) = self.selected {
-                        let devices = self.devices.lock().unwrap();
-                        if let Some(device) = devices.get(idx) {
-                            let device_clone = device.clone();
-                            let file_path_clone = self.file_path.clone();
-
-                            // Spawn a background task to send the file
-                            tokio::spawn(async move {
-                                send_file_to_device(&device_clone, &file_path_clone).await;
+                                ui.add_space(5.0);
+                                ui.vertical_centered(|ui| {
+                                    ui.label(egui::RichText::new(
+                                        &device.name
+                                    ).strong().size(14.0));
+                                    
+                                    // Show IP as subtext
+                                    ui.label(egui::RichText::new(&device.ip).size(10.0).color(Color32::GRAY));
+                                });
                             });
+                        }
+                    });
+                });
+            }
 
-                            LOGGER.info(format!(
-                                "Sending {} to {}...",
-                                self.file_name, device.hostname
-                            ));
+            // Send Button
+            ui.add_space(20.0);
+            ui.vertical_centered(|ui| {
+                ui.add_enabled_ui(self.selected.is_some(), |ui| {
+                    if ui.button("Send File").clicked() {
+                        if let Some(idx) = self.selected {
+                            let devices = self.devices.lock().unwrap();
+                            if let Some(device) = devices.get(idx) {
+                                let device_clone = device.clone();
+                                let path_clone = self.file_path.clone();
+                                
+                                // Spawn send task
+                                std::thread::spawn(move || {
+                                    let rt = tokio::runtime::Runtime::new().unwrap();
+                                    rt.block_on(async {
+                                        send_file_to_device(&device_clone, &path_clone).await;
+                                    });
+                                });
+                                
+                                // Close window or show success state? 
+                                // For now, just close or stay open. 
+                                // Let's keep it open to show log?
+                                // Actually we don't have log UI here.
+                                // Just print to terminal for now.
+                                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                            }
                         }
                     }
+                });
             });
         });
     }

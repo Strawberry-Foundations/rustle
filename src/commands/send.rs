@@ -95,6 +95,8 @@ pub async fn send_file(file_path: &str) {
         hostname: target_device.hostname.clone(),
         ip: selected_ip.clone(),
         port: target_device.port,
+        display_name: target_device.display_name.clone(),
+        avatar_data: target_device.avatar_data.clone(),
     };
 
     // Connect to the stream once
