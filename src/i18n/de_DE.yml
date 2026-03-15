@@ -1,0 +1,37 @@
+de_DE:
+  # Core
+  notifier_title: "Eingehende Datei"
+  notifier_body: "<b>%s</b> möchte dir eine Datei senden:\n\n📄 <b>%s</b>"
+  notifier_accept: "Annehmen"
+  notifier_decline: "Ablehnen"
+
+  # Settings
+  settings_title: "Rustle Einstellungen"
+  settings_profile: "Benutzerprofil"
+  settings_display_name: "Anzeigename:"
+  settings_avatar_path: "Avatar-Pfad:"
+  settings_avatar_hint: "Lokaler Dateipfad (z.B. /home/user/pic.png)."
+  settings_general: "Allgemein"
+  settings_download_path: "Download-Pfad:"
+  settings_notifications: "Benachrichtigungen anzeigen"
+  settings_language: "Sprache:"
+  settings_save_btn: "Einstellungen speichern"
+  settings_saved_msg: "Einstellungen erfolgreich gespeichert!"
+  settings_error_msg: "Fehler beim Speichern: %s"
+
+  # Send
+  send_title: "Senden mit Rustle"
+  send_file_title: "Datei senden"
+  send_file_name: "Datei: %s"
+  send_searching: "Suche nach Geräten..."
+  send_btn: "Datei senden"
+  send_status_start: "Übertragung startet..."
+  send_status_connect: "Verbinde mit %s (%s:%s)..."
+  send_status_req: "Sende Transfer-Anfrage..."
+  send_status_wait_acc: "Warte auf Annahme..."
+  send_status_declined: "Empfänger hat abgelehnt."
+  send_status_data: "Sende Datei..."
+  send_status_wait_conf: "Warte auf Bestätigung..."
+  send_status_complete: "Übertragung abgeschlossen!"
+  send_status_error: "Fehler: %s"
+  send_status_panic: "Thread abgestürzt während Transfer."

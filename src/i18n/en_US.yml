@@ -1,0 +1,37 @@
+en_US:
+  # Core
+  notifier_title: "Incoming File"
+  notifier_body: "<b>%s</b> wants to send you a file:\n\n📂 <i>%s</i>"
+  notifier_accept: "Accept"
+  notifier_decline: "Decline"
+
+  # Settings
+  settings_title: "Rustle Settings"
+  settings_profile: "User Profile"
+  settings_display_name: "Display Name:"
+  settings_avatar_path: "Avatar Path:"
+  settings_avatar_hint: "Use a local file path (e.g. /home/user/pic.png)."
+  settings_general: "General"
+  settings_download_path: "Download Path:"
+  settings_notifications: "Show Notifications"
+  settings_language: "Language:"
+  settings_save_btn: "Save Settings"
+  settings_saved_msg: "Settings saved successfully!"
+  settings_error_msg: "Error saving settings: %s"
+
+  # Send
+  send_title: "Send with Rustle"
+  send_file_title: "Send File"
+  send_file_name: "File: %s"
+  send_searching: "Searching for devices..."
+  send_btn: "Send File"
+  send_status_start: "Starting transfer..."
+  send_status_connect: "Connecting to %s (%s:%s)..."
+  send_status_req: "Sending transfer request..."
+  send_status_wait_acc: "Waiting for acceptance..."
+  send_status_declined: "Transfer declined by recipient."
+  send_status_data: "Sending file data..."
+  send_status_wait_conf: "Waiting for confirmation..."
+  send_status_complete: "Transfer complete!"
+  send_status_error: "Error: %s"
+  send_status_panic: "Thread panicked during transfer."

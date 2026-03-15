@@ -24,6 +24,7 @@ pub struct NetworkConfig {
 pub struct GeneralConfig {
     pub default_download_path: String,
     pub show_notifications: bool,
+    pub language: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -53,6 +54,7 @@ impl Default for Config {
             general: GeneralConfig {
                 default_download_path: "~/Downloads".to_string(),
                 show_notifications: true,
+                language: None,
             },
             user: UserConfig::default(),
         }

@@ -11,6 +11,7 @@ use std::{
 
 use crate::core::config::ConfigManager;
 use crate::core::device::DiscoveredDevice;
+use crate::core::I18N;
 
 pub fn show_settings_dialog() {
     let options = NativeOptions {
@@ -52,6 +53,7 @@ struct SettingsDialog {
     avatar_path: String,
     download_path: String,
     show_notifications: bool,
+    language: String, // "en_US" or "de_DE" etc.
     status_msg: Option<String>,
 }
 
@@ -60,11 +62,21 @@ impl SettingsDialog {
         let config_manager = ConfigManager::new();
         let config = &config_manager.config;
         
+        let language = config.general.language.clone().unwrap_or_else(|| {
+             std::env::var("LANG")
+                .unwrap_or_else(|_| "en_US.UTF-8".to_string())
+                .split('.')
+                .next()
+                .unwrap_or("en_US")
+                .to_string()
+        });
+
         Self {
             display_name: config.user.display_name.clone().unwrap_or_default(),
             avatar_path: config.user.avatar_path.clone().unwrap_or_default(),
             download_path: config.general.default_download_path.clone(),
             show_notifications: config.general.show_notifications,
+            language,
             config_manager,
             status_msg: None,
         }
@@ -85,10 +97,11 @@ impl SettingsDialog {
 
         self.config_manager.config.general.default_download_path = self.download_path.clone();
         self.config_manager.config.general.show_notifications = self.show_notifications;
+        self.config_manager.config.general.language = Some(self.language.clone());
 
         match self.config_manager.save() {
-            Ok(_) => self.status_msg = Some("Settings saved successfully!".to_string()),
-            Err(e) => self.status_msg = Some(format!("Error saving settings: {}", e)),
+            Ok(_) => self.status_msg = Some(I18N.get("settings_saved_msg")),
+            Err(e) => self.status_msg = Some(I18N.get("settings_error_msg").replace("{0}", &e.to_string())),
         }
     }
 }
@@ -96,36 +109,47 @@ impl SettingsDialog {
 impl eframe::App for SettingsDialog {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Rustle Settings");
+            ui.heading(I18N.get("settings_title"));
             ui.add_space(10.0);
 
             ui.group(|ui| {
-                ui.label("User Profile");
+                ui.label(I18N.get("settings_profile"));
                 ui.horizontal(|ui| {
-                    ui.label("Display Name:");
+                    ui.label(I18N.get("settings_display_name"));
                     ui.text_edit_singleline(&mut self.display_name);
                 });
                 ui.horizontal(|ui| {
-                    ui.label("Avatar Path:");
+                    ui.label(I18N.get("settings_avatar_path"));
                     ui.text_edit_singleline(&mut self.avatar_path);
                 });
-                ui.small("Use a local file path (e.g., /home/user/pic.png).");
+                ui.small(I18N.get("settings_avatar_hint"));
             });
 
             ui.add_space(10.0);
 
             ui.group(|ui| {
-                ui.label("General");
+                ui.label(I18N.get("settings_general"));
                 ui.horizontal(|ui| {
-                    ui.label("Download Path:");
+                    ui.label(I18N.get("settings_download_path"));
                     ui.text_edit_singleline(&mut self.download_path);
                 });
-                ui.checkbox(&mut self.show_notifications, "Show Notifications");
+                ui.checkbox(&mut self.show_notifications, I18N.get("settings_notifications"));
+                
+                ui.horizontal(|ui| {
+                     ui.label(I18N.get("settings_language"));
+                     let current = self.language.clone();
+                     egui::ComboBox::from_id_salt("language_select")
+                         .selected_text(&current)
+                         .show_ui(ui, |ui| {
+                             ui.selectable_value(&mut self.language, "en_US".to_string(), "English (en_US)");
+                             ui.selectable_value(&mut self.language, "de_DE".to_string(), "German (de_DE)");
+                         });
+                });
             });
 
             ui.add_space(20.0);
 
-            if ui.button("Save Settings").clicked() {
+            if ui.button(I18N.get("settings_save_btn")).clicked() {
                 self.save();
             }
 
@@ -213,8 +237,8 @@ impl eframe::App for SendDialog {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add_space(10.0);
             ui.vertical_centered(|ui| {
-                ui.heading("Send File");
-                ui.label(format!("File: {}", self.file_name));
+                ui.heading(I18N.get("send_file_title"));
+                ui.label(I18N.get("send_file_name").replace("{0}", &self.file_name));
             });
             ui.add_space(20.0);
 
@@ -224,7 +248,7 @@ impl eframe::App for SendDialog {
                     ui.add_space(50.0);
                     ui.spinner();
                     ui.add_space(10.0);
-                    ui.label("Searching for devices...");
+                    ui.label(I18N.get("send_searching"));
                 });
             } else {
                 egui::ScrollArea::vertical().show(ui, |ui| {
@@ -323,7 +347,7 @@ impl eframe::App for SendDialog {
 
             ui.vertical_centered(|ui| {
                 ui.add_enabled_ui(self.selected.is_some(), |ui| {
-                    if ui.button("Send File").clicked() {
+                    if ui.button(I18N.get("send_btn")).clicked() {
                         if let Some(idx) = self.selected {
                             let devices = self.devices.lock().unwrap();
                             if let Some(device) = devices.get(idx) {
@@ -333,7 +357,7 @@ impl eframe::App for SendDialog {
                                 
                                 // Reset status
                                 if let Ok(mut msg) = status.lock() {
-                                    *msg = "Starting transfer...".to_string();
+                                    *msg = I18N.get("send_status_start");
                                 }
                                 
                                 // Spawn send task
@@ -342,8 +366,8 @@ impl eframe::App for SendDialog {
                                     let result = std::panic::catch_unwind(|| {
                                         let res = send_file_sync(&device_clone, &path_clone, &status);
                                         match res {
-                                            Ok(_) => "Transfer complete!".to_string(),
-                                            Err(e) => format!("Error: {}", e),
+                                            Ok(_) => I18N.get("send_status_complete"),
+                                            Err(e) => I18N.get("send_status_error").replace("{0}", &e.to_string()),
                                         }
                                     });
 
@@ -351,7 +375,7 @@ impl eframe::App for SendDialog {
                                     if let Ok(mut msg) = status.lock() {
                                         *msg = match result {
                                             Ok(success_msg) => success_msg,
-                                            Err(_) => "Thread panicked during transfer.".to_string(),
+                                            Err(_) => I18N.get("send_status_panic"),
                                         };
                                     }
                                 });
@@ -385,7 +409,7 @@ fn send_file_sync(device: &DiscoveredDevice, file_path_str: &str, status: &Arc<M
         }
     };
 
-    update_status(&format!("Connecting to {} ({}:{})...", device.name, device.ip, device.port));
+    update_status(&I18N.get("send_status_connect").replace("{0}", &device.name).replace("{1}", &device.ip).replace("{2}", &device.port.to_string()));
 
     // Connect with timeout
     // Handle IPv6 properly by wrapping in brackets if needed
@@ -403,21 +427,21 @@ fn send_file_sync(device: &DiscoveredDevice, file_path_str: &str, status: &Arc<M
 
     let sender_name = whoami::hostname().unwrap_or_else(|_| "Unknown".to_string());
     
-    update_status("Sending transfer request...");
+    update_status(&I18N.get("send_status_req"));
     let request = format!("TRANSFER_REQUEST|{sender_name}|{file_name}|{file_size}\n");
     stream.write_all(request.as_bytes())?;
 
-    update_status("Waiting for acceptance...");
+    update_status(&I18N.get("send_status_wait_acc"));
     
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut response = String::new();
     reader.read_line(&mut response)?;
 
     if response.trim() != "ACCEPTED" {
-         return Err("Transfer declined by recipient.".into());
+         return Err(I18N.get("send_status_declined").into());
     }
 
-    update_status("Sending file data...");
+    update_status(&I18N.get("send_status_data"));
     let mut file = fs::File::open(file_path)?;
     
     std::io::copy(&mut file, &mut stream)?;
@@ -425,13 +449,13 @@ fn send_file_sync(device: &DiscoveredDevice, file_path_str: &str, status: &Arc<M
     // Flush
     stream.flush()?;
 
-    update_status("Waiting for confirmation...");
+    update_status(&I18N.get("send_status_wait_conf"));
     let mut ack = String::new();
     reader.read_line(&mut ack)?;
     
     if ack.trim() == "TRANSFER_COMPLETE" {
         Ok(())
     } else {
-        Err(format!("Receiver error or no ack: '{}'", ack.trim()).into())
+        Err(I18N.get("send_status_error").replace("{0}", ack.trim()).into())
     }
 }
