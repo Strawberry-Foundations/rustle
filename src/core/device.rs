@@ -180,25 +180,22 @@ async fn check_static_peer(host_or_ip: &str) -> Option<DiscoveredDevice> {
 async fn fetch_avatar(ip: &str, port: u16) -> Option<Vec<u8>> {
     let addr = format!("{}:{}", ip, port);
     // Short timeout for avatar fetch
-    if let Ok(Ok(mut stream)) = tokio::time::timeout(Duration::from_millis(500), TcpStream::connect(addr)).await {
-        if stream.write_all(b"GET_AVATAR\n").await.is_ok() {
+    if let Ok(Ok(mut stream)) = tokio::time::timeout(Duration::from_millis(500), TcpStream::connect(addr)).await
+        && stream.write_all(b"GET_AVATAR\n").await.is_ok() {
             let mut reader = tokio::io::BufReader::new(&mut stream);
             let mut line = String::new();
             if reader.read_line(&mut line).await.is_ok() {
                 let parts: Vec<&str> = line.trim().split('|').collect();
-                if parts.len() >= 2 && parts[0] == "AVATAR" {
-                     if let Ok(size) = parts[1].trim().parse::<u64>() {
-                         if size > 0 && size < 10_000_000 { // Limit size just in case
+                if parts.len() >= 2 && parts[0] == "AVATAR"
+                     && let Ok(size) = parts[1].trim().parse::<u64>()
+                         && size > 0 && size < 10_000_000 { // Limit size just in case
                              let mut buffer = vec![0u8; size as usize];
                              if reader.read_exact(&mut buffer).await.is_ok() {
                                  return Some(buffer);
                              }
                          }
-                     }
-                }
             }
         }
-    }
     None
 }
 

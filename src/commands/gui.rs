@@ -29,6 +29,9 @@ pub fn show_settings_dialog() {
     ) {
         eprintln!("Error running settings GUI: {e}");
     }
+    
+    // Ensure Clean Exit
+    std::process::exit(0);
 }
 
 pub fn show_send_dialog(devices: Arc<Mutex<Vec<DiscoveredDevice>>>, file_path: String) {
@@ -46,6 +49,9 @@ pub fn show_send_dialog(devices: Arc<Mutex<Vec<DiscoveredDevice>>>, file_path: S
     ) {
         eprintln!("Error running native GUI: {e}");
     }
+    
+    // Ensure Clean Exit
+    std::process::exit(0);
 }
 
 struct SettingsDialog {
@@ -339,27 +345,25 @@ impl eframe::App for SendDialog {
             drop(devices_guard);
 
             ui.add_space(20.0);
-            if let Ok(msg) = self.status_msg.lock() {
-                if !msg.is_empty() {
+            if let Ok(msg) = self.status_msg.lock()
+                && !msg.is_empty() {
                     ui.vertical_centered(|ui| {
                         ui.label(egui::RichText::new(msg.clone()).strong().size(14.0));
                     });
                     ui.add_space(10.0);
                 }
-            }
             
-            if let Ok(progress) = self.progress.lock() {
-                if let Some(p) = *progress {
+            if let Ok(progress) = self.progress.lock()
+                && let Some(p) = *progress {
                     ui.add_space(5.0);
                     ui.add(egui::ProgressBar::new(p).show_percentage());
                     ui.add_space(10.0);
                 }
-            }
 
             ui.vertical_centered(|ui| {
                 ui.add_enabled_ui(self.selected.is_some(), |ui| {
-                    if ui.button(I18N.get("send_btn")).clicked() {
-                        if let Some(idx) = self.selected {
+                    if ui.button(I18N.get("send_btn")).clicked()
+                        && let Some(idx) = self.selected {
                             let devices = self.devices.lock().unwrap();
                             if let Some(device) = devices.get(idx) {
                                 let device_clone = device.clone();
@@ -401,7 +405,6 @@ impl eframe::App for SendDialog {
                                 });
                             }
                         }
-                    }
                 });
             });
         });
@@ -493,11 +496,10 @@ fn send_file_sync(
         total_sent += bytes_read as u64;
         
         // Update progress
-        if file_size > 0 {
-            if let Ok(mut p) = progress.lock() {
+        if file_size > 0
+            && let Ok(mut p) = progress.lock() {
                 *p = Some(total_sent as f32 / file_size as f32);
             }
-        }
     }
     
     // Flush

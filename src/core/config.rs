@@ -85,7 +85,7 @@ impl ConfigManager {
     }
 
     pub fn save(&self) -> Result<(), std::io::Error> {
-        let yaml = serde_yaml::to_string(&self.config).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let yaml = serde_yaml::to_string(&self.config).map_err(std::io::Error::other)?;
         fs::write(&self._config_path, yaml)
     }
 
