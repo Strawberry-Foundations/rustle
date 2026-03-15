@@ -1,6 +1,48 @@
 use eframe::{Frame, NativeOptions};
-use crate::core::config::ConfigManager;
+use egui::Color32;
+use crate::core::config::{ConfigManager};
 use crate::core::I18N;
+
+
+fn configure_fonts(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+
+    // Font definitions
+    fonts.font_data.insert(
+        "GoogleSansFlex-Regular".to_owned(),
+        std::sync::Arc::new(egui::FontData::from_static(include_bytes!("../fonts/gsans_regular.ttf"))),
+    );
+
+    fonts.font_data.insert(
+        "GoogleSansFlex-Bold".to_owned(),
+        std::sync::Arc::new(egui::FontData::from_static(include_bytes!("../fonts/gsans_bold.ttf"))),
+    );
+
+    fonts.font_data.insert(
+        "GoogleSansCode".to_owned(),
+        std::sync::Arc::new(egui::FontData::from_static(include_bytes!("../fonts/gsans_code.ttf"))),
+    );
+
+    fonts
+        .families
+        .entry(egui::FontFamily::Proportional)
+        .or_default()
+        .insert(0, "GoogleSansFlex-Regular".to_owned());
+
+    fonts
+        .families
+        .entry(egui::FontFamily::Monospace)
+        .or_default()
+        .push("GoogleSansCode".to_owned());
+
+    // Create a dedicated font family for Headers
+    fonts.families.insert(
+        egui::FontFamily::Name("Heading".into()),
+        vec!["GoogleSansFlex-Bold".to_owned()],
+    );
+
+    ctx.set_fonts(fonts);
+}
 
 pub struct SettingsDialog {
     config_manager: ConfigManager,
@@ -16,15 +58,36 @@ impl SettingsDialog {
     pub fn run() {
         let options = NativeOptions {
             viewport: egui::ViewportBuilder::default()
-                .with_inner_size([400.0, 500.0])
+                .with_inner_size([450.0, 500.0])
                 .with_resizable(false),
             ..Default::default()
         };
 
+
+
         if let Err(e) = eframe::run_native(
-            "Rustle Settings",
+            I18N.get("settings_title").as_str(),
             options,
-            Box::new(|_cc| Ok(Box::new(SettingsDialog::new()))),
+            Box::new(|cc| {
+                // Configure Fonts
+                configure_fonts(&cc.egui_ctx);
+
+                // Configure Look & Feel
+                let mut style = (*cc.egui_ctx.style()).clone();
+                
+                // Larger basic font size
+                for (_text_style, font_id) in style.text_styles.iter_mut() {
+                    font_id.size *= 1.1; 
+                }
+                
+                // More spacing
+                style.spacing.item_spacing = egui::vec2(10.0, 10.0);
+                style.spacing.window_margin = egui::Margin::same(20);
+                
+                cc.egui_ctx.set_style(style);
+                
+                Ok(Box::new(SettingsDialog::new()))
+            }),
         ) {
             eprintln!("Error running settings GUI: {e}");
         }
@@ -84,54 +147,89 @@ impl SettingsDialog {
 impl eframe::App for SettingsDialog {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading(I18N.get("settings_title"));
-            ui.add_space(10.0);
-
-            ui.group(|ui| {
-                ui.label(I18N.get("settings_profile"));
-                ui.horizontal(|ui| {
-                    ui.label(I18N.get("settings_display_name"));
-                    ui.text_edit_singleline(&mut self.display_name);
-                });
-                ui.horizontal(|ui| {
-                    ui.label(I18N.get("settings_avatar_path"));
-                    ui.text_edit_singleline(&mut self.avatar_path);
-                });
-                ui.small(I18N.get("settings_avatar_hint"));
+            ui.vertical_centered(|ui| {
+                ui.heading(
+                    egui::RichText::new(
+                        I18N.get("settings_title")
+                    )
+                        .size(24.0)
+                        .family(egui::FontFamily::Name("Heading".into()))
+                        .color(Color32::WHITE)
+                );
             });
-
-            ui.add_space(10.0);
-
-            ui.group(|ui| {
-                ui.label(I18N.get("settings_general"));
-                ui.horizontal(|ui| {
-                    ui.label(I18N.get("settings_download_path"));
-                    ui.text_edit_singleline(&mut self.download_path);
-                });
-                ui.checkbox(&mut self.show_notifications, I18N.get("settings_notifications"));
-
-                ui.horizontal(|ui| {
-                    ui.label(I18N.get("settings_language"));
-                    let current = self.language.clone();
-                    egui::ComboBox::from_id_salt("language_select")
-                        .selected_text(&current)
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut self.language, "en_US".to_string(), "English (en_US)");
-                            ui.selectable_value(&mut self.language, "de_DE".to_string(), "German (de_DE)");
-                        });
-                });
-            });
-
             ui.add_space(20.0);
 
-            if ui.button(I18N.get("settings_save_btn")).clicked() {
-                self.save();
-            }
+            ui.group(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new(I18N.get("settings_profile")).strong().size(16.0));
+                    ui.add_space(5.0);
+                    
+                    egui::Grid::new("profile_grid")
+                        .num_columns(2)
+                        .spacing([15.0, 10.0])
+                        .show(ui, |ui| {
+                            ui.label(I18N.get("settings_display_name"));
+                            ui.text_edit_singleline(&mut self.display_name);
+                            ui.end_row();
 
-            if let Some(msg) = &self.status_msg {
-                ui.add_space(10.0);
-                ui.label(msg);
-            }
+                            ui.label(I18N.get("settings_avatar_path"));
+                            ui.text_edit_singleline(&mut self.avatar_path);
+                            ui.end_row();
+                        });
+
+                    ui.add_space(5.0);
+                    ui.label(egui::RichText::new(I18N.get("settings_avatar_hint")).small().italics());
+                });
+            });
+
+            ui.add_space(15.0);
+
+            ui.group(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new(I18N.get("settings_general")).strong().size(16.0));
+                    ui.add_space(5.0);
+
+                    egui::Grid::new("general_grid")
+                        .num_columns(2)
+                        .spacing([15.0, 10.0])
+                        .show(ui, |ui| {
+                            ui.label(I18N.get("settings_download_path"));
+                            ui.text_edit_singleline(&mut self.download_path);
+                            ui.end_row();
+
+                            ui.label(I18N.get("settings_language"));
+                            let current = self.language.clone();
+                            egui::ComboBox::from_id_salt("language_select")
+                                .selected_text(&current)
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(&mut self.language, "en_US".to_string(), "English (en_US)");
+                                    ui.selectable_value(&mut self.language, "de_DE".to_string(), "German (de_DE)");
+                                });
+                            ui.end_row();
+                        });
+
+                    ui.add_space(10.0);
+                    ui.checkbox(&mut self.show_notifications, I18N.get("settings_notifications"));
+                });
+            });
+
+            ui.add_space(25.0);
+
+            ui.vertical_centered(|ui| {
+                if ui.add(egui::Button::new(egui::RichText::new(I18N.get("settings_save_btn")).size(16.0)).min_size(egui::vec2(150.0, 40.0))).clicked() {
+                    self.save();
+                }
+
+                if let Some(msg) = &self.status_msg {
+                    ui.add_space(10.0);
+                    
+                    if msg.contains("Error") || msg.contains("Fehler") {
+                         ui.label(egui::RichText::new(msg).color(egui::Color32::from_rgb(200, 50, 50)).strong());
+                    } else {
+                         ui.label(egui::RichText::new(msg).color(egui::Color32::from_rgb(50, 150, 50)).strong());
+                    }
+                }
+            });
         });
     }
 }

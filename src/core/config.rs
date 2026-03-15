@@ -61,6 +61,7 @@ impl Default for Config {
     }
 }
 
+#[derive(Clone)]
 pub struct ConfigManager {
     pub config: Config,
     _config_path: PathBuf,
