@@ -9,9 +9,7 @@ use std::{
     net::TcpStream,
 };
 
-use crate::commands::send::stream_file_data;
 use crate::core::config::ConfigManager;
-use crate::core::constants::LOGGER;
 use crate::core::device::DiscoveredDevice;
 
 pub fn show_settings_dialog() {
@@ -145,6 +143,7 @@ struct SendDialog {
     file_path: String,
     file_name: String,
     texture_cache: HashMap<String, TextureHandle>,
+    status_msg: Arc<Mutex<String>>,
 }
 
 impl SendDialog {
@@ -161,6 +160,7 @@ impl SendDialog {
             file_path,
             file_name,
             texture_cache: HashMap::new(),
+            status_msg: Arc::new(Mutex::new(String::new())),
         }
     }
 
@@ -257,23 +257,15 @@ impl eframe::App for SendDialog {
                                     Color32::from_gray(220) // Light gray
                                 };
                                 
-                                // Draw Avatar or Fallback
+                                // Draw Avatar
                                 if let Some(texture) = self.texture_cache.get(&device_id) {
-                                    // Draw texture with rounding (circular)
-                                    // egui::Painter doesn't have a direct "image_with_rounding" easily accessible 
-                                    // without a specific shader or mesh. 
-                                    // Just drawing a square image inside the circle for now 
-                                    // or using an Image widget would have been easier if we weren't doing manual layout.
-                                    // Let's use a square image clipped by a circle? 
-                                    // Actually, egui Images support rounding.
-                                    // But we allocated a painter. 
-                                    // Let's just draw the image rect.
-                                    painter.image(
-                                        texture.id(),
-                                        rect,
-                                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                                        Color32::WHITE
-                                    );
+                                    // Use Image widget for easier handling of aspect ratio and rounding
+                                    let image = egui::Image::new(texture)
+                                        .fit_to_exact_size(rect.size())
+                                        .corner_radius(radius as u8);
+                                    
+                                    // Place the image in the rect
+                                    ui.put(rect, image);
                                     
                                     // Draw selection ring
                                     if is_selected {
@@ -316,8 +308,19 @@ impl eframe::App for SendDialog {
                 });
             }
 
-            // Send Button
+            // Drop the lock explicitly to avoid deadlock when clicking the button below
+            drop(devices_guard);
+
             ui.add_space(20.0);
+            if let Ok(msg) = self.status_msg.lock() {
+                if !msg.is_empty() {
+                    ui.vertical_centered(|ui| {
+                        ui.label(egui::RichText::new(msg.clone()).strong().size(14.0));
+                    });
+                    ui.add_space(10.0);
+                }
+            }
+
             ui.vertical_centered(|ui| {
                 ui.add_enabled_ui(self.selected.is_some(), |ui| {
                     if ui.button("Send File").clicked() {
@@ -325,22 +328,33 @@ impl eframe::App for SendDialog {
                             let devices = self.devices.lock().unwrap();
                             if let Some(device) = devices.get(idx) {
                                 let device_clone = device.clone();
-                                let path_clone = self.file_path.clone();
+                                let path_clone = self.file_path.clone(); // Clone PathBuf? String.
+                                let status = self.status_msg.clone();
+                                
+                                // Reset status
+                                if let Ok(mut msg) = status.lock() {
+                                    *msg = "Starting transfer...".to_string();
+                                }
                                 
                                 // Spawn send task
                                 std::thread::spawn(move || {
-                                    let rt = tokio::runtime::Runtime::new().unwrap();
-                                    rt.block_on(async {
-                                        send_file_to_device(&device_clone, &path_clone).await;
+                                    // Use a catch_unwind to prevent the thread from crashing silently
+                                    let result = std::panic::catch_unwind(|| {
+                                        let res = send_file_sync(&device_clone, &path_clone, &status);
+                                        match res {
+                                            Ok(_) => "Transfer complete!".to_string(),
+                                            Err(e) => format!("Error: {}", e),
+                                        }
                                     });
+
+                                    // Update status based on result
+                                    if let Ok(mut msg) = status.lock() {
+                                        *msg = match result {
+                                            Ok(success_msg) => success_msg,
+                                            Err(_) => "Thread panicked during transfer.".to_string(),
+                                        };
+                                    }
                                 });
-                                
-                                // Close window or show success state? 
-                                // For now, just close or stay open. 
-                                // Let's keep it open to show log?
-                                // Actually we don't have log UI here.
-                                // Just print to terminal for now.
-                                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                             }
                         }
                     }
@@ -350,75 +364,74 @@ impl eframe::App for SendDialog {
     }
 }
 
-async fn send_file_to_device(device: &DiscoveredDevice, file_path: &str) {
-    // Check if file exists
-    let file_path_obj = Path::new(file_path);
-    if !file_path_obj.exists() {
-        LOGGER.error(format!("Error: File '{file_path}' does not exist"));
-        return;
+
+
+fn send_file_sync(device: &DiscoveredDevice, file_path_str: &str, status: &Arc<Mutex<String>>) -> Result<(), Box<dyn std::error::Error>> {
+    let file_path = Path::new(file_path_str);
+    if !file_path.exists() {
+        return Err("File does not exist".into());
     }
 
-    let file_size = match fs::metadata(file_path) {
-        Ok(meta) => meta.len(),
-        Err(e) => {
-            LOGGER.error(format!("Could not read file metadata: {e}"));
-            return;
-        }
-    };
-
-    LOGGER.info(format!(
-        "Sending transfer request to {} ({})...",
-        device.name, device.ip
-    ));
-
-    // Connect to the device
-    let mut stream = match TcpStream::connect(format!("{}:{}", device.ip, device.port)) {
-        Ok(s) => s,
-        Err(e) => {
-            LOGGER.error(format!("Failed to connect to {}: {}", device.hostname, e));
-            return;
-        }
-    };
-
-    match send_transfer_request(&mut stream, file_path, file_size).await {
-        Ok(accepted) => {
-            if accepted {
-                LOGGER.info("Transfer accepted! Sending file...");
-                match stream_file_data(&mut stream, file_path).await {
-                    Ok(_) => LOGGER.info("File transfer completed successfully!"),
-                    Err(e) => LOGGER.error(format!("File transfer failed: {e}")),
-                }
-            } else {
-                LOGGER.warning("Transfer was declined by the recipient.");
-            }
-        }
-        Err(e) => {
-            LOGGER.error(format!("Error sending transfer request: {e}"));
-        }
-    }
-}
-
-async fn send_transfer_request(
-    stream: &mut TcpStream,
-    file_path: &str,
-    file_size: u64,
-) -> Result<bool, String> {
-    let sender_name = whoami::hostname().unwrap_or_else(|_| "Unknown".to_string());
-    let file_name = Path::new(file_path)
+    let file_metadata = fs::metadata(file_path)?;
+    let file_size = file_metadata.len();
+    let file_name = file_path
         .file_name()
         .and_then(|name| name.to_str())
-        .unwrap_or("unknown");
+        .ok_or("Invalid filename")?;
 
-    let request = format!(
-        "TRANSFER_REQUEST|{sender_name}|{file_name}|{file_size}\n"
-    );
-    stream
-        .write_all(request.as_bytes())
-        .map_err(|e| e.to_string())?;
+    let update_status = |msg: &str| {
+        if let Ok(mut s) = status.lock() {
+            *s = msg.to_string();
+        }
+    };
 
+    update_status(&format!("Connecting to {} ({}:{})...", device.name, device.ip, device.port));
+
+    // Connect with timeout
+    // Handle IPv6 properly by wrapping in brackets if needed
+    let addr_str = if device.ip.contains(':') {
+        format!("[{}]:{}", device.ip, device.port)
+    } else {
+        format!("{}:{}", device.ip, device.port)
+    };
+    
+    let addr: std::net::SocketAddr = addr_str.parse()?;
+    let mut stream = TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(5))?;
+    
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(30)))?;
+    stream.set_write_timeout(Some(std::time::Duration::from_secs(30)))?;
+
+    let sender_name = whoami::hostname().unwrap_or_else(|_| "Unknown".to_string());
+    
+    update_status("Sending transfer request...");
+    let request = format!("TRANSFER_REQUEST|{sender_name}|{file_name}|{file_size}\n");
+    stream.write_all(request.as_bytes())?;
+
+    update_status("Waiting for acceptance...");
+    
+    let mut reader = BufReader::new(stream.try_clone()?);
     let mut response = String::new();
-    let mut reader = BufReader::new(stream);
-    reader.read_line(&mut response).map_err(|e| e.to_string())?;
+    reader.read_line(&mut response)?;
 
-    Ok(response.trim() == "ACCEPTED")
+    if response.trim() != "ACCEPTED" {
+         return Err("Transfer declined by recipient.".into());
+    }
+
+    update_status("Sending file data...");
+    let mut file = fs::File::open(file_path)?;
+    
+    std::io::copy(&mut file, &mut stream)?;
+    
+    // Flush
+    stream.flush()?;
+
+    update_status("Waiting for confirmation...");
+    let mut ack = String::new();
+    reader.read_line(&mut ack)?;
+    
+    if ack.trim() == "TRANSFER_COMPLETE" {
+        Ok(())
+    } else {
+        Err(format!("Receiver error or no ack: '{}'", ack.trim()).into())
+    }
 }
