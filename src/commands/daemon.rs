@@ -115,13 +115,18 @@ pub fn handle_transfer_request(mut stream: TcpStream) -> Result<(), Box<dyn std:
 
     if !parts.is_empty() && parts[0] == "GET_AVATAR" {
         if let Some(avatar_path) = &CFG.config.user.avatar_path {
-            if let Ok(mut file) = fs::File::open(avatar_path) {
-                let metadata = file.metadata()?;
-                let size = metadata.len();
-                let response = format!("AVATAR|{}\n", size);
-                stream.write_all(response.as_bytes())?;
-                std::io::copy(&mut file, &mut stream)?;
-                return Ok(());
+            if let Ok(img) = image::open(avatar_path) {
+                let resized = img.resize(128, 128, image::imageops::FilterType::Lanczos3);
+                let mut buffer = std::io::Cursor::new(Vec::new());
+                if resized.write_to(&mut buffer, image::ImageFormat::Png).is_ok() {
+                    let data = buffer.into_inner();
+                    let response = format!("AVATAR|{}\n", data.len());
+                    stream.write_all(response.as_bytes())?;
+                    stream.write_all(&data)?;
+                    return Ok(());
+                }
+            } else {
+                LOGGER.warning(format!("Failed to load avatar: {avatar_path}"));
             }
         }
         stream.write_all(b"AVATAR|0\n")?;
