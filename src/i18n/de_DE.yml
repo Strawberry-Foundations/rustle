@@ -33,5 +33,13 @@ de_DE:
   send_status_data: "Sende Datei..."
   send_status_wait_conf: "Warte auf Bestätigung..."
   send_status_complete: "Übertragung abgeschlossen!"
-  send_status_error: "Fehler: %s"
+  send_status_error: "Fehler: {}"
   send_status_panic: "Thread abgestürzt während Transfer."
+
+  # Notifier (Transfer Status)
+  notifier_transfer_started: "Dateiübertragung gestartet..."
+  notifier_transfer_success: "Datei '{}' erfolgreich empfangen!"
+  notifier_transfer_error: "Fehler beim Empfangen von '{}': {}"
+  notifier_success_title: "Übertragung abgeschlossen"
+  notifier_error_title: "Übertragungsfehler"
+  notifier_info_title: "Rustle Info"

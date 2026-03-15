@@ -66,8 +66,9 @@ pub async fn discover_devices() -> Vec<DiscoveredDevice> {
                             let hostname_str = info.get_hostname()
                                 .trim_end_matches('.')
                                 .trim_end_matches(".local");
-                            // Filter out own device
-                            if hostname_str == whoami::hostname().unwrap_or_default() {
+                            
+                            // Filter out local IPs
+                            if is_local_ip(&ip) {
                                 continue;
                             }
 
@@ -146,12 +147,13 @@ async fn check_static_peer(host_or_ip: &str) -> Option<DiscoveredDevice> {
                         if parts.len() >= 3 && parts[0] == "INFO" {
                             let hostname = parts[1].to_string();
 
-                            // Filter out own device
-                            if hostname == whoami::hostname().unwrap_or_default() {
+                            let ip = peer_addr.ip().to_string();
+
+                            // Filter out local IPs
+                            if is_local_ip(&ip) {
                                 return None;
                             }
 
-                            let ip = peer_addr.ip().to_string();
                             let port = peer_addr.port();
                             
                             let mut device = DiscoveredDevice {
@@ -198,6 +200,10 @@ async fn fetch_avatar(ip: &str, port: u16) -> Option<Vec<u8>> {
         }
     }
     None
+}
+
+fn is_local_ip(ip: &str) -> bool {
+    std::net::UdpSocket::bind(format!("{}:0", ip)).is_ok()
 }
 
 pub async fn discover_devices_continuously(devices: Arc<Mutex<Vec<DiscoveredDevice>>>) {
@@ -266,8 +272,8 @@ pub async fn discover_devices_continuously(devices: Arc<Mutex<Vec<DiscoveredDevi
                                 .trim_end_matches(".local")
                                 .to_string();
 
-                             // Filter out own device
-                             if hostname == whoami::hostname().unwrap_or_default() {
+                             // Filter out local IPs logic
+                             if is_local_ip(&ip_clone) {
                                  continue;
                              }
                              
