@@ -11,12 +11,11 @@ use crate::core::config::ConfigManager;
 
 pub struct Daemon {
     pub port: u16,
-    pub hostname: String,
 }
 
 impl Daemon {
-    pub fn new(port: u16, hostname: String) -> Self {
-        Self { port, hostname }
+    pub fn new(port: u16) -> Self {
+        Self { port }
     }
 
     pub async fn start(&self) {

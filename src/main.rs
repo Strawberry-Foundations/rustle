@@ -1,12 +1,25 @@
-use std::{env, sync::{Arc, Mutex}};
+use std::{
+    env,
+    sync::{Arc, Mutex},
+};
 
 use crate::{
-    commands::{daemon::Daemon, gui::{show_send_dialog, show_settings_dialog}, scan::scan_services, send::send_file},
-    core::{constants::CFG, device::{discover_devices_continuously, DiscoveredDevice}},
+    commands::{
+        daemon::Daemon,
+        gui::show_send_dialog,
+        scan::scan_services,
+        send::send_file,
+    },
+    core::{
+        constants::CFG,
+        device::{DiscoveredDevice, discover_devices_continuously},
+    },
 };
+use crate::gui::settings::SettingsDialog;
 
 pub mod commands;
 pub mod core;
+pub mod gui;
 
 #[tokio::main]
 async fn main() {
@@ -19,10 +32,10 @@ async fn main() {
 
     match args[1].as_str() {
         "settings" => {
-            show_settings_dialog();
+            SettingsDialog::run()
         }
         "daemon" => {
-            let daemon = Daemon::new(CFG.config.network.port, "localhost".to_string());
+            let daemon = Daemon::new(CFG.config.network.port);
             daemon.start().await;
         }
         "send" => {
@@ -42,18 +55,18 @@ async fn main() {
                 println!("Usage: {} gui <file_path>", args[0]);
                 return;
             }
-            
+
             let file_path = args[2].clone();
-            
+
             // Create shared device list
             let devices = Arc::new(Mutex::new(Vec::<DiscoveredDevice>::new()));
             let devices_clone = Arc::clone(&devices);
-            
+
             // Start continuous discovery in background
             tokio::spawn(async move {
                 discover_devices_continuously(devices_clone).await;
             });
-            
+
             // Show GUI immediately (will be empty initially)
             show_send_dialog(devices, file_path);
         }
