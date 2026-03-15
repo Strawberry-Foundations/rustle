@@ -425,7 +425,11 @@ fn send_file_sync(device: &DiscoveredDevice, file_path_str: &str, status: &Arc<M
     stream.set_read_timeout(Some(std::time::Duration::from_secs(30)))?;
     stream.set_write_timeout(Some(std::time::Duration::from_secs(30)))?;
 
-    let sender_name = whoami::hostname().unwrap_or_else(|_| "Unknown".to_string());
+    // Load sender name from config, fallback to hostname
+    let config_manager = ConfigManager::new();
+    let sender_name = config_manager.config.user.display_name
+        .clone()
+        .unwrap_or_else(|| whoami::hostname().unwrap_or_else(|_| "Unknown".to_string()));
     
     update_status(&I18N.get("send_status_req"));
     let request = format!("TRANSFER_REQUEST|{sender_name}|{file_name}|{file_size}\n");

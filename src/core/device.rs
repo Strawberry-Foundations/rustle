@@ -63,9 +63,17 @@ pub async fn discover_devices() -> Vec<DiscoveredDevice> {
                             });
                             
                         if let Some(ip) = ip_addr {
+                            let hostname_str = info.get_hostname()
+                                .trim_end_matches('.')
+                                .trim_end_matches(".local");
+                            // Filter out own device
+                            if hostname_str == whoami::hostname().unwrap_or_default() {
+                                continue;
+                            }
+
                             let mut device = DiscoveredDevice {
                                 name: extract_instance_name(info.get_fullname()).to_string(),
-                                hostname: info.get_hostname().trim_end_matches('.').to_string(),
+                                hostname: hostname_str.to_string(),
                                 ip: ip.clone(),
                                 port: info.get_port(),
                                 display_name: None,
@@ -137,6 +145,12 @@ async fn check_static_peer(host_or_ip: &str) -> Option<DiscoveredDevice> {
                         let parts: Vec<&str> = response.trim().split('|').collect();
                         if parts.len() >= 3 && parts[0] == "INFO" {
                             let hostname = parts[1].to_string();
+
+                            // Filter out own device
+                            if hostname == whoami::hostname().unwrap_or_default() {
+                                return None;
+                            }
+
                             let ip = peer_addr.ip().to_string();
                             let port = peer_addr.port();
                             
@@ -247,7 +261,15 @@ pub async fn discover_devices_continuously(devices: Arc<Mutex<Vec<DiscoveredDevi
                              let ip_clone = ip.clone();
                              let port = info.get_port();
                              let name = extract_instance_name(info.get_fullname()).to_string();
-                             let hostname = info.get_hostname().trim_end_matches('.').to_string();
+                             let hostname = info.get_hostname()
+                                .trim_end_matches('.')
+                                .trim_end_matches(".local")
+                                .to_string();
+
+                             // Filter out own device
+                             if hostname == whoami::hostname().unwrap_or_default() {
+                                 continue;
+                             }
                              
                              let devices_ref = devices.clone();
                              
