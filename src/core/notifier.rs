@@ -28,3 +28,23 @@ pub fn show_transfer_notification(sender: &str, filename: &str) -> Result<bool, 
         None => Ok(false),
     }
 }
+
+pub fn show_simple(title: &str, body: &str, is_error: bool) {
+    let urgency = if is_error { "critical" } else { "normal" };
+    let icon = "/home/julian/Projects/rustle/rustle.png";
+
+    // Build notification
+    let notifier = Notifier::new(
+        title,
+        body.to_string(),
+        "Rustle",
+        urgency,
+        icon,
+        None,
+        0,
+        false,
+    ).build();
+
+    // Fire and forget (or wait briefly if needed, but we ignore result)
+    let _ = notifier.send_with_actions_and_wait(vec![]);
+}

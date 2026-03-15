@@ -1,4 +1,4 @@
-use crate::core::{constants::{CFG, LOGGER}, notifier::show_transfer_notification};
+use crate::core::{constants::{CFG, LOGGER}, notifier::{show_transfer_notification, show_simple}, I18N};
 use mdns_sd::{ServiceDaemon, ServiceInfo};
 use std::{
     fs,
@@ -150,6 +150,8 @@ pub fn handle_transfer_request(mut stream: TcpStream) -> Result<(), Box<dyn std:
 
     if accepted {
         stream.write_all(b"ACCEPTED\n")?;
+        show_simple(&I18N.get("notifier_info_title"), &I18N.get("notifier_transfer_started"), false);
+
         LOGGER.info("Transfer accepted. Receiving file...");
 
         let config_manager = ConfigManager::new();
@@ -162,10 +164,12 @@ pub fn handle_transfer_request(mut stream: TcpStream) -> Result<(), Box<dyn std:
             Ok(_) => {
                 LOGGER.info(format!("File successfully saved to {download_path:?}"));
                 stream.write_all(b"TRANSFER_COMPLETE\n")?;
+                show_simple(&I18N.get("notifier_success_title"), &I18N.get_with_params("notifier_transfer_success", &[&file_name]), false);
             }
             Err(e) => {
                 LOGGER.error(format!("Failed to receive file: {e}"));
                 stream.write_all(format!("ERROR|{e}\n").as_bytes())?;
+                show_simple(&I18N.get("notifier_error_title"), &I18N.get_with_params("notifier_transfer_error", &[&file_name, &e.to_string()]), true);
             }
         }
     } else {
