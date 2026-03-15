@@ -12,6 +12,7 @@ use std::{
 use crate::core::config::ConfigManager;
 use crate::core::device::DiscoveredDevice;
 use crate::core::I18N;
+use std::io::Read;
 
 pub fn show_settings_dialog() {
     let options = NativeOptions {
@@ -168,6 +169,7 @@ struct SendDialog {
     file_name: String,
     texture_cache: HashMap<String, TextureHandle>,
     status_msg: Arc<Mutex<String>>,
+    progress: Arc<Mutex<Option<f32>>>,
 }
 
 impl SendDialog {
@@ -185,6 +187,7 @@ impl SendDialog {
             file_name,
             texture_cache: HashMap::new(),
             status_msg: Arc::new(Mutex::new(String::new())),
+            progress: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -344,6 +347,14 @@ impl eframe::App for SendDialog {
                     ui.add_space(10.0);
                 }
             }
+            
+            if let Ok(progress) = self.progress.lock() {
+                if let Some(p) = *progress {
+                    ui.add_space(5.0);
+                    ui.add(egui::ProgressBar::new(p).show_percentage());
+                    ui.add_space(10.0);
+                }
+            }
 
             ui.vertical_centered(|ui| {
                 ui.add_enabled_ui(self.selected.is_some(), |ui| {
@@ -354,17 +365,21 @@ impl eframe::App for SendDialog {
                                 let device_clone = device.clone();
                                 let path_clone = self.file_path.clone(); // Clone PathBuf? String.
                                 let status = self.status_msg.clone();
+                                let progress = self.progress.clone();
                                 
                                 // Reset status
                                 if let Ok(mut msg) = status.lock() {
                                     *msg = I18N.get("send_status_start");
+                                }
+                                if let Ok(mut p) = progress.lock() {
+                                    *p = Some(0.0);
                                 }
                                 
                                 // Spawn send task
                                 std::thread::spawn(move || {
                                     // Use a catch_unwind to prevent the thread from crashing silently
                                     let result = std::panic::catch_unwind(|| {
-                                        let res = send_file_sync(&device_clone, &path_clone, &status);
+                                        let res = send_file_sync(&device_clone, &path_clone, &status, &progress);
                                         match res {
                                             Ok(_) => I18N.get("send_status_complete"),
                                             Err(e) => I18N.get_with_params("send_status_error", &[&e.to_string()]),
@@ -378,6 +393,11 @@ impl eframe::App for SendDialog {
                                             Err(_) => I18N.get("send_status_panic"),
                                         };
                                     }
+                                    
+                                    // Reset progress
+                                    if let Ok(mut p) = progress.lock() {
+                                        *p = None;
+                                    }
                                 });
                             }
                         }
@@ -390,7 +410,12 @@ impl eframe::App for SendDialog {
 
 
 
-fn send_file_sync(device: &DiscoveredDevice, file_path_str: &str, status: &Arc<Mutex<String>>) -> Result<(), Box<dyn std::error::Error>> {
+fn send_file_sync(
+    device: &DiscoveredDevice, 
+    file_path_str: &str, 
+    status: &Arc<Mutex<String>>,
+    progress: &Arc<Mutex<Option<f32>>>
+) -> Result<(), Box<dyn std::error::Error>> {
     let file_path = Path::new(file_path_str);
     if !file_path.exists() {
         return Err("File does not exist".into());
@@ -448,7 +473,30 @@ fn send_file_sync(device: &DiscoveredDevice, file_path_str: &str, status: &Arc<M
     update_status(&I18N.get("send_status_data"));
     let mut file = fs::File::open(file_path)?;
     
-    std::io::copy(&mut file, &mut stream)?;
+    // Manually copy with progress monitoring
+    let mut buffer = [0u8; 8192];
+    let mut total_sent: u64 = 0;
+    
+    // Initialize progress bar
+    if let Ok(mut p) = progress.lock() {
+        *p = Some(0.0);
+    }
+    
+    loop {
+        let bytes_read = file.read(&mut buffer)?;
+        if bytes_read == 0 {
+            break;
+        }
+        stream.write_all(&buffer[..bytes_read])?;
+        total_sent += bytes_read as u64;
+        
+        // Update progress
+        if file_size > 0 {
+            if let Ok(mut p) = progress.lock() {
+                *p = Some(total_sent as f32 / file_size as f32);
+            }
+        }
+    }
     
     // Flush
     stream.flush()?;
