@@ -224,9 +224,9 @@ impl eframe::App for SettingsDialog {
                     ui.add_space(10.0);
                     
                     if msg.contains("Error") || msg.contains("Fehler") {
-                         ui.label(egui::RichText::new(msg).color(egui::Color32::from_rgb(200, 50, 50)).strong());
+                         ui.label(egui::RichText::new(msg).color(Color32::from_rgb(200, 50, 50)).strong());
                     } else {
-                         ui.label(egui::RichText::new(msg).color(egui::Color32::from_rgb(50, 150, 50)).strong());
+                         ui.label(egui::RichText::new(msg).color(Color32::from_rgb(50, 150, 50)).strong());
                     }
                 }
             });

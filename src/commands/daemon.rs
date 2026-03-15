@@ -2,11 +2,12 @@ use crate::core::{constants::{CFG, LOGGER}, notifier::{show_transfer_notificatio
 use mdns_sd::{ServiceDaemon, ServiceInfo};
 use std::{
     fs,
-    io::{BufRead, BufReader, Read, Write},
+    io::{BufRead, BufReader, Read, Write, Cursor},
     net::{TcpListener, TcpStream},
     path::PathBuf,
 };
 use tokio::task;
+use rodio::DeviceSinkBuilder;
 use crate::core::config::ConfigManager;
 
 pub struct Daemon {
@@ -146,6 +147,19 @@ pub fn handle_transfer_request(mut stream: TcpStream) -> Result<(), Box<dyn std:
     LOGGER.info(format!(
         "Transfer request from {sender_name} for file '{file_name}' ({file_size} bytes)"
     ));
+
+    // Play notification sound
+    std::thread::spawn(|| {
+        if let Ok(handle) = DeviceSinkBuilder::open_default_sink() {
+            // Include sound file at compile time to avoid runtime path issues
+            let sound_data = include_bytes!("../../assets/notification.ogg");
+            let cursor = Cursor::new(sound_data);
+            
+            if let Ok(player) = rodio::play(&handle.mixer(), cursor) {
+                player.sleep_until_end();
+            }
+        }
+    });
 
     let accepted = show_transfer_notification(sender_name, file_name)?;
 
