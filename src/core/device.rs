@@ -5,7 +5,6 @@ use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
-use tokio::time::sleep;
 use ipnet::Ipv4Net;
 
 use crate::core::constants::{CFG, LOGGER};
@@ -116,14 +115,14 @@ async fn check_static_peer(host_or_ip: &str) -> Option<DiscoveredDevice> {
     if let Ok(result) = tokio::time::timeout(
         Duration::from_millis(1500), 
         TcpStream::connect(&addr_str)
-    ).await {
-        if let Ok(mut stream) = result {
+    ).await
+        && let Ok(mut stream) = result {
             let peer_addr = stream.peer_addr().ok()?;
             
             if stream.write_all(b"INFO\n").await.is_ok() {
                 let mut buffer = [0; 1024];
-                if let Ok(n) = stream.read(&mut buffer).await {
-                    if n > 0 {
+                if let Ok(n) = stream.read(&mut buffer).await
+                    && n > 0 {
                         let response = String::from_utf8_lossy(&buffer[..n]);
                         let parts: Vec<&str> = response.trim().split('|').collect();
                         if parts.len() >= 3 && parts[0] == "INFO" {
@@ -139,10 +138,8 @@ async fn check_static_peer(host_or_ip: &str) -> Option<DiscoveredDevice> {
                             });
                         }
                     }
-                }
             }
         }
-    }
     None
 }
 
@@ -154,11 +151,11 @@ pub async fn discover_devices_continuously(devices: Arc<Mutex<Vec<DiscoveredDevi
 
     // Initial mDNS setup
     let mdns = ServiceDaemon::new().expect("Failed to create daemon");
-    let receiver = mdns.browse(service_type).expect("Failed to browse");
+    let _receiver = mdns.browse(service_type).expect("Failed to browse");
 
     loop {
         // --- 1. Static Peers & Subnet Scanning (Background Task) ---
-        let devices_clone = devices.clone();
+        let _devices_clone = devices.clone();
         
         let mut scanning_targets = Vec::new();
         if let Some(static_peers) = &CFG.config.network.static_peers {

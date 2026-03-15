@@ -87,12 +87,11 @@ impl ConfigManager {
 
     fn create_default_config(path: &Path) -> Config {
         let config = Config::default();
-        if let Some(parent) = path.parent() {
-            if let Err(e) = fs::create_dir_all(parent) {
+        if let Some(parent) = path.parent()
+            && let Err(e) = fs::create_dir_all(parent) {
                 LOGGER.error(format!("Could not create configuration directory: {e}"));
                 return config;
             }
-        }
         match serde_yaml::to_string(&config) {
             Ok(yaml) => {
                 if let Err(e) = fs::write(path, yaml) {

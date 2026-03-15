@@ -25,38 +25,30 @@ pub async fn scan_services() {
     
     loop {
         // Poll for new service types
-        if let Ok(event) = receiver.recv_timeout(Duration::from_millis(500)) {
-            match event {
-                ServiceEvent::ServiceFound(service_type, _) => {
-                    if service_types.insert(service_type.clone()) {
-                        let clean_name = service_type.trim_end_matches(".local.");
-                        LOGGER.info(format!("Found NEW service type: {clean_name}"));
-                        
-                        // Spawn a browser for this type
-                        let mdns_clone = mdns.clone();
-                        let type_clone = service_type.clone();
-                        
-                        tokio::spawn(async move {
-                             if let Ok(inst_receiver) = mdns_clone.browse(&type_clone) {
-                                 while let Ok(event) = inst_receiver.recv_async().await {
-                                     match event {
-                                         ServiceEvent::ServiceResolved(info) => {
-                                             LOGGER.info(format!(
-                                                 "  [Resolved] {} at {}:{}",
-                                                 info.get_fullname(),
-                                                 info.get_hostname().trim_end_matches('.'),
-                                                 info.get_port()
-                                             ));
-                                         }
-                                          _ => {}
-                                     }
+        if let Ok(event) = receiver.recv_timeout(Duration::from_millis(500))
+            && let ServiceEvent::ServiceFound(service_type, _) = event
+                && service_types.insert(service_type.clone()) {
+                    let clean_name = service_type.trim_end_matches(".local.");
+                    LOGGER.info(format!("Found NEW service type: {clean_name}"));
+                    
+                    // Spawn a browser for this type
+                    let mdns_clone = mdns.clone();
+                    let type_clone = service_type.clone();
+                    
+                    tokio::spawn(async move {
+                         if let Ok(inst_receiver) = mdns_clone.browse(&type_clone) {
+                             while let Ok(event) = inst_receiver.recv_async().await {
+                                 if let ServiceEvent::ServiceResolved(info) = event {
+                                     LOGGER.info(format!(
+                                         "  [Resolved] {} at {}:{}",
+                                         info.get_fullname(),
+                                         info.get_hostname().trim_end_matches('.'),
+                                         info.get_port()
+                                     ));
                                  }
                              }
-                        });
-                    }
+                         }
+                    });
                 }
-                _ => {}
-            }
-        }
     }
 }

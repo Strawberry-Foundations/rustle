@@ -156,8 +156,8 @@ impl eframe::App for SendDialog {
                     egui::Button::new("Send").min_size(vec2(ui.available_width() - 32.0, 40.0));
 
                 let is_enabled = self.selected.is_some();
-                if ui.add_enabled(is_enabled, send_button).clicked() {
-                    if let Some(idx) = self.selected {
+                if ui.add_enabled(is_enabled, send_button).clicked()
+                    && let Some(idx) = self.selected {
                         let devices = self.devices.lock().unwrap();
                         if let Some(device) = devices.get(idx) {
                             let device_clone = device.clone();
@@ -174,7 +174,6 @@ impl eframe::App for SendDialog {
                             ));
                         }
                     }
-                }
             });
         });
     }
