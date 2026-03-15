@@ -101,7 +101,7 @@ impl SettingsDialog {
 
         match self.config_manager.save() {
             Ok(_) => self.status_msg = Some(I18N.get("settings_saved_msg")),
-            Err(e) => self.status_msg = Some(I18N.get("settings_error_msg").replace("{0}", &e.to_string())),
+            Err(e) => self.status_msg = Some(I18N.get_with_params("settings_error_msg", &[&e.to_string()])),
         }
     }
 }
@@ -238,7 +238,7 @@ impl eframe::App for SendDialog {
             ui.add_space(10.0);
             ui.vertical_centered(|ui| {
                 ui.heading(I18N.get("send_file_title"));
-                ui.label(I18N.get("send_file_name").replace("{0}", &self.file_name));
+                ui.label(I18N.get_with_params("send_file_name", &[&self.file_name]));
             });
             ui.add_space(20.0);
 
@@ -367,7 +367,7 @@ impl eframe::App for SendDialog {
                                         let res = send_file_sync(&device_clone, &path_clone, &status);
                                         match res {
                                             Ok(_) => I18N.get("send_status_complete"),
-                                            Err(e) => I18N.get("send_status_error").replace("{0}", &e.to_string()),
+                                            Err(e) => I18N.get_with_params("send_status_error", &[&e.to_string()]),
                                         }
                                     });
 
@@ -409,7 +409,7 @@ fn send_file_sync(device: &DiscoveredDevice, file_path_str: &str, status: &Arc<M
         }
     };
 
-    update_status(&I18N.get("send_status_connect").replace("{0}", &device.name).replace("{1}", &device.ip).replace("{2}", &device.port.to_string()));
+    update_status(&I18N.get_with_params("send_status_connect", &[&device.name, &device.ip, &device.port.to_string()]));
 
     // Connect with timeout
     // Handle IPv6 properly by wrapping in brackets if needed
@@ -456,6 +456,6 @@ fn send_file_sync(device: &DiscoveredDevice, file_path_str: &str, status: &Arc<M
     if ack.trim() == "TRANSFER_COMPLETE" {
         Ok(())
     } else {
-        Err(I18N.get("send_status_error").replace("{0}", ack.trim()).into())
+        Err(I18N.get_with_params("send_status_error", &[&ack.trim()]).into())
     }
 }
