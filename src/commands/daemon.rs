@@ -99,6 +99,8 @@ impl Daemon {
 }
 
 pub fn handle_transfer_request(mut stream: TcpStream) -> Result<(), Box<dyn std::error::Error>> {
+    stream.set_nodelay(true)?; // Disable Nagle's algorithm for faster small messages
+
     let mut reader = BufReader::new(&stream);
     let mut request_line = String::new();
 

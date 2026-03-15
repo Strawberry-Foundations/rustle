@@ -33,18 +33,22 @@ pub fn show_simple(title: &str, body: &str, is_error: bool) {
     let urgency = if is_error { "critical" } else { "normal" };
     let icon = "/home/julian/Projects/rustle/rustle.png";
 
-    // Build notification
-    let notifier = Notifier::new(
-        title,
-        body.to_string(),
-        "Rustle",
-        urgency,
-        icon,
-        None,
-        0,
-        false,
-    ).build();
+    let body_owned = body.to_string();
+    let title_owned = title.to_string();
+    let urgency_owned = urgency.to_string();
 
-    // Fire and forget (or wait briefly if needed, but we ignore result)
-    let _ = notifier.send_with_actions_and_wait(vec![]);
+    std::thread::spawn(move || {
+        let notifier = Notifier::new(
+            &title_owned,
+            body_owned,
+            "Rustle",
+            &urgency_owned,
+            icon,
+            None,
+            0,
+            false,
+        ).build();
+        
+        let _ = notifier.send_with_actions_and_wait(vec![]);
+    });
 }

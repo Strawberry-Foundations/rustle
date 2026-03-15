@@ -446,7 +446,9 @@ fn send_file_sync(
     
     let addr: std::net::SocketAddr = addr_str.parse()?;
     let mut stream = TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(5))?;
-    
+    // Disable Nagle's algorithm for faster small packet transmission (e.g. handshake)
+    stream.set_nodelay(true)?;
+
     stream.set_read_timeout(Some(std::time::Duration::from_secs(30)))?;
     stream.set_write_timeout(Some(std::time::Duration::from_secs(30)))?;
 
