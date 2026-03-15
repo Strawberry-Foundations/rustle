@@ -13,30 +13,10 @@ use crate::core::config::ConfigManager;
 use crate::core::device::DiscoveredDevice;
 use crate::core::I18N;
 use std::io::Read;
+use crate::gui::{configure_fonts, configure_styles};
 
 
-pub fn show_send_dialog(devices: Arc<Mutex<Vec<DiscoveredDevice>>>, file_path: String) {
-    let options = NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([500.0, 420.0]) // Slightly larger for better grid
-            .with_resizable(true),
-        ..Default::default()
-    };
-
-    if let Err(e) = eframe::run_native(
-        "Send with Rustle",
-        options,
-        Box::new(|_cc| Ok(Box::new(SendDialog::new(devices, file_path)))),
-    ) {
-        eprintln!("Error running native GUI: {e}");
-    }
-    
-    // Ensure Clean Exit
-    std::process::exit(0);
-}
-
-
-struct SendDialog {
+pub struct SendDialog {
     devices: Arc<Mutex<Vec<DiscoveredDevice>>>,
     selected: Option<usize>,
     file_path: String,
@@ -47,6 +27,30 @@ struct SendDialog {
 }
 
 impl SendDialog {
+    pub fn run(devices: Arc<Mutex<Vec<DiscoveredDevice>>>, file_path: String) {
+        let options = NativeOptions {
+            viewport: egui::ViewportBuilder::default()
+                .with_inner_size([500.0, 420.0]) // Slightly larger for better grid
+                .with_resizable(true),
+            ..Default::default()
+        };
+
+        if let Err(e) = eframe::run_native(
+            "Send with Rustle",
+            options,
+            Box::new(|cc| {
+                configure_fonts(&cc.egui_ctx);
+                configure_styles(&cc.egui_ctx);
+                Ok(Box::new(SendDialog::new(devices, file_path)))
+            }),
+        ) {
+            eprintln!("Error running native GUI: {e}");
+        }
+
+        // Ensure Clean Exit
+        std::process::exit(0);
+    }
+
     fn new(devices: Arc<Mutex<Vec<DiscoveredDevice>>>, file_path: String) -> Self {
         let file_name = Path::new(&file_path)
             .file_name()
@@ -110,11 +114,83 @@ impl eframe::App for SendDialog {
             self.load_texture(ctx, &id, &data);
         }
 
+        // Bottom Panel for Status, Progress and Button
+        egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
+             ui.add_space(10.0);
+             if let Ok(msg) = self.status_msg.lock()
+                && !msg.is_empty() {
+                    ui.vertical_centered(|ui| {
+                        ui.label(egui::RichText::new(msg.clone()).strong().size(14.0));
+                    });
+                    ui.add_space(10.0);
+                }
+            
+            if let Ok(progress) = self.progress.lock()
+                && let Some(p) = *progress {
+                    ui.add_space(5.0);
+                    ui.add(egui::ProgressBar::new(p).show_percentage());
+                    ui.add_space(10.0);
+                }
+
+            ui.vertical_centered(|ui| {
+                ui.add_enabled_ui(self.selected.is_some(), |ui| {
+                    if ui.button(I18N.get("send_btn")).clicked()
+                        && let Some(idx) = self.selected {
+                            let devices = self.devices.lock().unwrap();
+                            if let Some(device) = devices.get(idx) {
+                                let device_clone = device.clone();
+                                let path_clone = self.file_path.clone(); // Clone PathBuf? String.
+                                let status = self.status_msg.clone();
+                                let progress = self.progress.clone();
+                                
+                                // Reset status
+                                if let Ok(mut msg) = status.lock() {
+                                    *msg = I18N.get("send_status_start");
+                                }
+                                if let Ok(mut p) = progress.lock() {
+                                    *p = Some(0.0);
+                                }
+                                
+                                // Spawn send task
+                                std::thread::spawn(move || {
+                                    // Use a catch_unwind to prevent the thread from crashing silently
+                                    let result = std::panic::catch_unwind(|| {
+                                        let res = send_file_sync(&device_clone, &path_clone, &status, &progress);
+                                        match res {
+                                            Ok(_) => I18N.get("send_status_complete"),
+                                            Err(e) => I18N.get_with_params("send_status_error", &[&e.to_string()]),
+                                        }
+                                    });
+
+                                    // Update status based on result
+                                    if let Ok(mut msg) = status.lock() {
+                                        *msg = match result {
+                                            Ok(success_msg) => success_msg,
+                                            Err(_) => I18N.get("send_status_panic"),
+                                        };
+                                    }
+                                    
+                                    // Reset progress
+                                    if let Ok(mut p) = progress.lock() {
+                                        *p = None;
+                                    }
+                                });
+                            }
+                        }
+                });
+            });
+            ui.add_space(10.0);
+        });
+
         // 2. Render UI
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add_space(10.0);
             ui.vertical_centered(|ui| {
-                ui.heading(I18N.get("send_file_title"));
+                ui.heading(
+                    egui::RichText::new(I18N.get("send_file_title"))
+                        .size(24.0)
+                        .family(egui::FontFamily::Name("Heading".into()))
+                );
                 ui.label(I18N.get_with_params("send_file_name", &[&self.file_name]));
             });
             ui.add_space(20.0);
@@ -211,70 +287,6 @@ impl eframe::App for SendDialog {
 
             // Drop the lock explicitly to avoid deadlock when clicking the button below
             drop(devices_guard);
-
-            ui.add_space(20.0);
-            if let Ok(msg) = self.status_msg.lock()
-                && !msg.is_empty() {
-                    ui.vertical_centered(|ui| {
-                        ui.label(egui::RichText::new(msg.clone()).strong().size(14.0));
-                    });
-                    ui.add_space(10.0);
-                }
-            
-            if let Ok(progress) = self.progress.lock()
-                && let Some(p) = *progress {
-                    ui.add_space(5.0);
-                    ui.add(egui::ProgressBar::new(p).show_percentage());
-                    ui.add_space(10.0);
-                }
-
-            ui.vertical_centered(|ui| {
-                ui.add_enabled_ui(self.selected.is_some(), |ui| {
-                    if ui.button(I18N.get("send_btn")).clicked()
-                        && let Some(idx) = self.selected {
-                            let devices = self.devices.lock().unwrap();
-                            if let Some(device) = devices.get(idx) {
-                                let device_clone = device.clone();
-                                let path_clone = self.file_path.clone(); // Clone PathBuf? String.
-                                let status = self.status_msg.clone();
-                                let progress = self.progress.clone();
-                                
-                                // Reset status
-                                if let Ok(mut msg) = status.lock() {
-                                    *msg = I18N.get("send_status_start");
-                                }
-                                if let Ok(mut p) = progress.lock() {
-                                    *p = Some(0.0);
-                                }
-                                
-                                // Spawn send task
-                                std::thread::spawn(move || {
-                                    // Use a catch_unwind to prevent the thread from crashing silently
-                                    let result = std::panic::catch_unwind(|| {
-                                        let res = send_file_sync(&device_clone, &path_clone, &status, &progress);
-                                        match res {
-                                            Ok(_) => I18N.get("send_status_complete"),
-                                            Err(e) => I18N.get_with_params("send_status_error", &[&e.to_string()]),
-                                        }
-                                    });
-
-                                    // Update status based on result
-                                    if let Ok(mut msg) = status.lock() {
-                                        *msg = match result {
-                                            Ok(success_msg) => success_msg,
-                                            Err(_) => I18N.get("send_status_panic"),
-                                        };
-                                    }
-                                    
-                                    // Reset progress
-                                    if let Ok(mut p) = progress.lock() {
-                                        *p = None;
-                                    }
-                                });
-                            }
-                        }
-                });
-            });
         });
     }
 }

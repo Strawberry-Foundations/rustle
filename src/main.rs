@@ -6,7 +6,6 @@ use std::{
 use crate::{
     commands::{
         daemon::Daemon,
-        gui::show_send_dialog,
         scan::scan_services,
         send::send_file,
     },
@@ -15,6 +14,7 @@ use crate::{
         device::{DiscoveredDevice, discover_devices_continuously},
     },
 };
+use crate::gui::send::SendDialog;
 use crate::gui::settings::SettingsDialog;
 
 pub mod commands;
@@ -68,7 +68,7 @@ async fn main() {
             });
 
             // Show GUI immediately (will be empty initially)
-            show_send_dialog(devices, file_path);
+            SendDialog::run(devices, file_path);
         }
         _ => {
             println!("Error: Unknown command '{}'", args[1]);
