@@ -150,7 +150,8 @@ pub fn handle_transfer_request(mut stream: TcpStream) -> Result<(), Box<dyn std:
 
     // Play notification sound
     std::thread::spawn(|| {
-        if let Ok(handle) = DeviceSinkBuilder::open_default_sink() {
+        if let Ok(mut handle) = DeviceSinkBuilder::open_default_sink() {
+            handle.log_on_drop(false);
             // Include sound file at compile time to avoid runtime path issues
             let sound_data = include_bytes!("../../assets/notification.ogg");
             let cursor = Cursor::new(sound_data);
